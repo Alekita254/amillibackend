@@ -31,7 +31,7 @@ from api.views import NewsletterSignupView, ContactFormView, SendCustomEmailView
 # Swagger schema view
 schema_view = get_schema_view(
     openapi.Info(
-        title="Newsletter & Contact API",
+        title="A million Techies Backedn APIs",
         default_version='v1',
         description="API documentation for managing newsletter signups and contact form submissions",
     ),
