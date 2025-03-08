@@ -152,7 +152,8 @@ CORS_ALLOW_ALL_ORIGINS = True  # Allows all domains to access your API
 
 # OR for specific domains (recommended for production)
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # If using React frontend locally
-    "http://127.0.0.1:5000",  # If accessing Django server directly
-    "https://amilliontechies.com"  # Replace with your actual frontend URL
+    "http://localhost:3000", 
+    "http://127.0.0.1:5000", 
+    "https://amilliontechies.com", 
+    "http://138.197.23.86:5000",
 ]
