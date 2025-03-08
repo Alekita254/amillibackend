@@ -159,7 +159,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5000", 
     "https://amilliontechies.com", 
     "http://138.197.23.86:5000",
-    "milliapi.getotech.co.ke",
+    "https://milliapi.getotech.co.ke",
 ]
 
 # Static files (CSS, JavaScript, Images)
