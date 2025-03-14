@@ -66,3 +66,22 @@ docker-compose.override.yml
 
 # Ignore macOS system files
 .DS_Store
+
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.svg
+*.ico
+*.bmp
+*.tif
+*.tiff
+*.webp
+*.mp4
+*.webm
+*.ogv
+*.mp3
+*.wav
+*.flac
+*.aac
+*.ogg
