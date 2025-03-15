@@ -4,7 +4,7 @@ from django.urls import path, include, re_path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
-from api.views import NewsletterSignupView, ContactFormView, SendCustomEmailView, AuthorListCreateView, AuthorDetailView, BlogListCreateView, BlogDetailView
+from api.views import NewsletterSignupView, ContactFormView, SendCustomEmailView, AuthorListCreateView, BlogDataView, AuthorDetailView, BlogListCreateView, BlogDetailView, PopularBlogsView
 
 # Swagger schema view
 schema_view = get_schema_view(
@@ -27,6 +27,10 @@ urlpatterns = [
     path('api/authors/<int:pk>/', AuthorDetailView.as_view(), name='author_detail'),
     path('api/blogs/', BlogListCreateView.as_view(), name='blog_list_create'),
     path('api/blogs/<int:pk>/', BlogDetailView.as_view(), name='blog_detail'),
+    path("api/blog-data/", BlogDataView.as_view(), name="blog-data"),
+    path("api/popularBlogs/", PopularBlogsView.as_view(), name="blog-data"),
+
+
 
 
     # Swagger endpoints

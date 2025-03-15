@@ -37,6 +37,7 @@ class Blog(models.Model):
     category = models.CharField(max_length=100)
     tags = models.CharField(max_length=255)
     slug = models.SlugField(unique=True, blank=True)
+    views = models.PositiveIntegerField(default=0)
 
     def save(self, *args, **kwargs):
         if not self.slug:
