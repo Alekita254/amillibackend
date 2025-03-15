@@ -143,6 +143,10 @@ class BlogDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.AllowAny] 
 
     def retrieve(self, request, *args, **kwargs):
+        blog =self.get_object()
+        blog.views += 1
+        blog.save(update_fields=["views"])
+        
         response = super().retrieve(request, *args, **kwargs)
         return custom_response(
             success=True,
@@ -165,3 +169,63 @@ class BlogDetailView(generics.RetrieveUpdateDestroyAPIView):
             message="Blog deleted successfully",
             data=None
         )
+    
+class PopularBlogsView(generics.ListAPIView):
+    queryset = Blog.objects.all().order_by("-views")[:5]
+    serializer_class = BlogSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return custom_response(
+            success=True,
+            message="Popular blogs retrieved successfully",
+            data=response.data
+        )
+
+class BlogDataView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        # Get all unique categories from Blog model
+        categories = Blog.objects.values_list("category", flat=True).distinct()
+
+        # Get all blogs
+        blogs = Blog.objects.all().order_by('-date')  # Latest blogs first
+        serialized_blogs = BlogSerializer(blogs, many=True).data
+
+        # Format blog list
+        blog_list = [
+            {
+                "id": blog["id"],
+                "title": blog["title"],
+                "description": blog["content"][:100],  # Short description preview
+                "image": blog["cover_image"],  # Assuming 'cover_image' holds image URLs
+                "category": blog["category"],
+                "views": blog["views"],  # Include view count
+            }
+            for blog in serialized_blogs
+        ]
+
+        # Fetch top 5 most popular blogs by views
+        popular_blogs = Blog.objects.all().order_by('-views')[:5]
+        popular_posts = [
+            {"id": blog.id, "title": blog.title, "link": f"/blog/{blog.slug}/"}
+            for blog in popular_blogs
+        ]
+
+        # Dynamic Sidebar Content
+        sidebar_content = {
+            "popularPosts": popular_posts,
+            "tags": Blog.objects.values_list("tags", flat=True).distinct(),  # Get unique tags
+        }
+
+        # Construct response
+        blogData = {
+            "categories": list(categories),
+            "blogs": blog_list,
+            "sidebarContent": sidebar_content,
+        }
+
+        return Response(blogData, status=200)
+
