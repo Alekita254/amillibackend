@@ -173,4 +173,8 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIAFILES_DIRS = [MEDIA_ROOT]
+
+# SITE_DOMAIN = "https://milliapi.getotech.co.ke"
+SITE_DOMAIN = "http://127.0.0.1:5000"
 

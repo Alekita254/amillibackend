@@ -199,7 +199,7 @@ class BlogDataView(APIView):
             {
                 "id": blog["id"],
                 "title": blog["title"],
-                "description": blog["content"][:100],  # Short description preview
+                "description": blog["description"][:100],  # Short description preview
                 "image": blog["cover_image"],  # Assuming 'cover_image' holds image URLs
                 "category": blog["category"],
                 "views": blog["views"],  # Include view count
