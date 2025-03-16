@@ -4,7 +4,9 @@ from django.urls import path, include, re_path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
-from api.views import NewsletterSignupView, ContactFormView, SendCustomEmailView, AuthorListCreateView, BlogDataView, AuthorDetailView, BlogListCreateView, BlogDetailView, PopularBlogsView
+from api.views import (NewsletterSignupView, ContactFormView, SendCustomEmailView, AuthorListCreateView, BlogDataView,
+                       AuthorDetailView, BlogListCreateView, BlogDetailView, PopularBlogsView,   CommentListCreateView,
+                       CommentDetailView)
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -28,9 +30,11 @@ urlpatterns = [
     path('api/authors/', AuthorListCreateView.as_view(), name='author_list_create'),
     path('api/authors/<int:pk>/', AuthorDetailView.as_view(), name='author_detail'),
     path('api/blogs/', BlogListCreateView.as_view(), name='blog_list_create'),
-    path('api/blogs/<int:pk>/', BlogDetailView.as_view(), name='blog_detail'),
+    path('api/blogs/<slug:slug>/', BlogDetailView.as_view(), name='blog_detail'),
     path("api/blog-data/", BlogDataView.as_view(), name="blog-data"),
     path("api/popularBlogs/", PopularBlogsView.as_view(), name="blog-data"),
+    path('api/comments/', CommentListCreateView.as_view(), name='comment_list_create'),
+    path('api/comments/<int:pk>/', CommentDetailView.as_view(), name='comment_detail'),
 
 
 

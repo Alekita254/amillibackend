@@ -47,3 +47,17 @@ class Blog(models.Model):
     def __str__(self):
         return self.title
     
+class Comment(models.Model):
+    name = models.CharField(max_length=100)
+    email = models.EmailField(blank=True, null=True)
+    message = models.TextField()
+    blog = models.ForeignKey('Blog', on_delete=models.CASCADE, related_name='comments')
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies')
+    likes = models.PositiveIntegerField(default=0)
+    dislikes = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        if self.parent:
+            return f"Reply by {self.name} to {self.parent.name}"
+        return f"Comment by {self.name} on {self.blog.title}"
