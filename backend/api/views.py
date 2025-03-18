@@ -234,66 +234,78 @@ class BlogDataView(APIView):
 
         return Response(blogData, status=200)
 
-#
-# class CommentListCreateView(generics.ListCreateAPIView):
-#     """
-#     List all comments or create a new comment.
-#     If a `parent` is provided, it will be a reply to another comment.
-#     """
-#     queryset = Comment.objects.all()
-#     serializer_class = CommentSerializer
-#     permission_classes = [permissions.AllowAny]  # Open for all users
-#
-#     def perform_create(self, serializer):
-#         """Automatically associate the comment with a blog."""
-#         serializer.save()
-#
-#
-# class CommentDetailView(generics.RetrieveUpdateDestroyAPIView):
-#     """
-#     Retrieve, update, or delete a single comment.
-#     """
-#     queryset = Comment.objects.all()
-#     serializer_class = CommentSerializer
-#     permission_classes = [permissions.AllowAny]
 
 class CommentListCreateView(APIView):
     """
-    List all comments or create a new comment.
+    List all comments for a specific blog or create a new comment.
     """
     permission_classes = [permissions.AllowAny]
 
-    def get(self, request):
-        # Get all comments ordered by creation date (latest first)
-        comments = Comment.objects.all().order_by('-created_at')
-        serialized_comments = CommentSerializer(comments, many=True).data
+    def get(self, request, postId=None):
+        try:
+            # Filter comments by blog ID if postId is provided
+            if postId:
+                comments = Comment.objects.filter(blog=postId).order_by('-created_at')
+            else:
+                comments = Comment.objects.all().order_by('-created_at')
 
-        # Format comments to ensure a clean response
-        comment_list = [
-            {
-                "id": comment["id"],
-                "name": comment["name"],
-                "message": comment["message"],
-                "blog": comment["blog"],
-                "likes": comment["likes"],
-                "dislikes": comment["dislikes"],
-                "created_at": comment["created_at"],
-                "replies": comment["replies"],  # Ensure nested replies are included
+            serialized_comments = CommentSerializer(comments, many=True).data
+
+            # Format comments to ensure a clean response
+            comment_list = [
+                {
+                    "id": comment["id"],
+                    "name": comment["name"],
+                    "message": comment["message"],
+                    "blog": comment["blog"],
+                    "likes": comment["likes"],
+                    "dislikes": comment["dislikes"],
+                    "created_at": comment["created_at"],
+                    "parent": comment["parent"],
+                    "replies": comment["replies"],  # Ensure nested replies are included
+                }
+                for comment in serialized_comments
+            ]
+
+            response_data = {
+                "message": "Comments fetched successfully",
+                "data": {
+                    "comments": comment_list,
+                },
+                "status": status.HTTP_200_OK,
             }
-            for comment in serialized_comments
-        ]
+            return Response(response_data, status=status.HTTP_200_OK)
 
-        return Response({"comments": comment_list}, status=200)
+        except Exception as e:
+            return Response(
+                {"message": "Failed to fetch comments", "error": str(e), "status": status.HTTP_500_INTERNAL_SERVER_ERROR},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     def post(self, request):
         """
         Create a new comment.
         """
-        serializer = CommentSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=201)
-        return Response(serializer.errors, status=400)
+        try:
+            serializer = CommentSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                response_data = {
+                    "message": "Comment created successfully",
+                    "data": serializer.data,
+                    "status": status.HTTP_201_CREATED,
+                }
+                return Response(response_data, status=status.HTTP_201_CREATED)
+            else:
+                return Response(
+                    {"message": "Invalid data", "errors": serializer.errors, "status": status.HTTP_400_BAD_REQUEST},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        except Exception as e:
+            return Response(
+                {"message": "Failed to create comment", "error": str(e), "status": status.HTTP_500_INTERNAL_SERVER_ERROR},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class CommentDetailView(APIView):
@@ -306,9 +318,17 @@ class CommentDetailView(APIView):
         try:
             comment = Comment.objects.get(pk=pk)
             serialized_comment = CommentSerializer(comment).data
-            return Response(serialized_comment, status=200)
+            response_data = {
+                "message": "Comment fetched successfully",
+                "data": serialized_comment,
+                "status": status.HTTP_200_OK,
+            }
+            return Response(response_data, status=status.HTTP_200_OK)
         except Comment.DoesNotExist:
-            return Response({"error": "Comment not found"}, status=404)
+            return Response(
+                {"message": "Comment not found", "status": status.HTTP_404_NOT_FOUND},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
     def put(self, request, pk):
         """
@@ -319,10 +339,22 @@ class CommentDetailView(APIView):
             serializer = CommentSerializer(comment, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
-                return Response(serializer.data, status=200)
-            return Response(serializer.errors, status=400)
+                response_data = {
+                    "message": "Comment updated successfully",
+                    "data": serializer.data,
+                    "status": status.HTTP_200_OK,
+                }
+                return Response(response_data, status=status.HTTP_200_OK)
+            else:
+                return Response(
+                    {"message": "Invalid data", "errors": serializer.errors, "status": status.HTTP_400_BAD_REQUEST},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         except Comment.DoesNotExist:
-            return Response({"error": "Comment not found"}, status=404)
+            return Response(
+                {"message": "Comment not found", "status": status.HTTP_404_NOT_FOUND},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
     def delete(self, request, pk):
         """
@@ -331,6 +363,60 @@ class CommentDetailView(APIView):
         try:
             comment = Comment.objects.get(pk=pk)
             comment.delete()
-            return Response({"message": "Comment deleted successfully"}, status=204)
+            return Response(
+                {"message": "Comment deleted successfully", "status": status.HTTP_204_NO_CONTENT},
+                status=status.HTTP_204_NO_CONTENT,
+            )
         except Comment.DoesNotExist:
-            return Response({"error": "Comment not found"}, status=404)
+            return Response(
+                {"message": "Comment not found", "status": status.HTTP_404_NOT_FOUND},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+class CommentLikeView(APIView):
+    """
+    Like a comment.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, pk):
+        try:
+            comment = Comment.objects.get(pk=pk)
+            comment.likes += 1
+            comment.save()
+            response_data = {
+                "message": "Comment liked successfully",
+                "data": {"likes": comment.likes},
+                "status": status.HTTP_200_OK,
+            }
+            return Response(response_data, status=status.HTTP_200_OK)
+        except Comment.DoesNotExist:
+            return Response(
+                {"message": "Comment not found", "status": status.HTTP_404_NOT_FOUND},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        
+
+class CommentDislikeView(APIView):
+    """
+    Dislike a comment.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, pk):
+        try:
+            comment = Comment.objects.get(pk=pk)
+            comment.dislikes += 1
+            comment.save()
+            response_data = {
+                "message": "Comment disliked successfully",
+                "data": {"dislikes": comment.dislikes},
+                "status": status.HTTP_200_OK,
+            }
+            return Response(response_data, status=status.HTTP_200_OK)
+        except Comment.DoesNotExist:
+            return Response(
+                {"message": "Comment not found", "status": status.HTTP_404_NOT_FOUND},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        
