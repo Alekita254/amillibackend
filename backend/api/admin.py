@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import NewsletterSubscriber, ContactMessage, Author, Blog, Comment
+from .models import NewsletterSubscriber, ContactMessage, Author, Blog, Comment, Community
 
 @admin.register(NewsletterSubscriber)
 class NewsletterSubscriberAdmin(admin.ModelAdmin):
@@ -38,3 +38,10 @@ class CommentAdmin(admin.ModelAdmin):
         # Optimize the queryset to reduce the number of database queries
         return super().get_queryset(request).select_related('blog', 'parent')
     
+@admin.register(Community)
+class CommunityAdmin(admin.ModelAdmin):
+    list_display = ('title', 'author', 'date', 'category', 'slug')
+    search_fields = ('title', 'author__name', 'category', 'tags')
+    list_filter = ('date', 'category')
+    prepopulated_fields = {'slug': ('title',)}
+    readonly_fields = ('date',)

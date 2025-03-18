@@ -2,9 +2,9 @@ from rest_framework import status, generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.core.mail import send_mail
-from .models import NewsletterSubscriber, ContactMessage, Author, Blog, Comment
+from .models import NewsletterSubscriber, ContactMessage, Author, Blog, Comment, Community
 from .serializers import (NewsletterSubscriberSerializer, ContactMessageSerializer, AuthorSerializer,
-                          BlogSerializer, CommentSerializer)
+                          BlogSerializer, CommentSerializer, CommunitySerializer)
 from .utils import custom_response 
 from django.shortcuts import get_object_or_404
 
@@ -420,3 +420,120 @@ class CommentDislikeView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         
+
+
+class CommunityListCreateView(generics.ListCreateAPIView):
+    queryset = Blog.objects.all()
+    serializer_class = CommunitySerializer
+    permission_classes = [permissions.AllowAny] 
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return custom_response(
+            success=True,
+            message="Community retrieved successfully",
+            data=response.data
+        )
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        return custom_response(
+            success=True,
+            message="Community created successfully",
+            data=response.data,
+            status_code=status.HTTP_201_CREATED
+        )
+
+class CommunityDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Blog.objects.all()
+    serializer_class = CommunitySerializer
+    permission_classes = [permissions.AllowAny] 
+
+    def get_object(self):
+        return get_object_or_404(Blog, slug=self.kwargs["slug"])
+
+    def retrieve(self, request, *args, **kwargs):
+        blog = self.get_object()
+        blog.views += 1
+        blog.save(update_fields=["views"])
+        
+        response = super().retrieve(request, *args, **kwargs)
+        return custom_response(
+            success=True,
+            message="Community retrieved successfully",
+            data=response.data
+        )
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        return custom_response(
+            success=True,
+            message="Community updated successfully",
+            data=response.data
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        super().destroy(request, *args, **kwargs)
+        return custom_response(
+            success=True,
+            message="Community deleted successfully",
+            data=None
+        )
+
+    
+class PopularCommunityView(generics.ListAPIView):
+    queryset = Community.objects.all().order_by("-views")[:5]
+    serializer_class = CommunitySerializer
+    permission_classes = [permissions.AllowAny]
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return custom_response(
+            success=True,
+            message="Popular events retrieved successfully",
+            data=response.data
+        )
+
+class CommunityDataView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        categories = Community.objects.values_list("category", flat=True).distinct()
+
+        community = Community.objects.all().order_by('-date')
+        serialized_community = CommunitySerializer(community, many=True).data
+
+        community_list = [
+            {
+                "id": community["id"],
+                "title": community["title"],
+                "description": community["description"][:100],
+                "image": community["cover_image"],
+                "category": community["category"],
+                "slug": community["slug"],
+                "views": community["views"],
+            }
+            for community in serialized_community
+        ]
+
+        popular_community = Community.objects.all().order_by('-views')[:5]
+        popular_events = [
+            {"id": community.id, "title": community.title, "link": f"/community/{community.slug}/"}
+            for community in popular_community
+        ]
+
+        # Dynamic Sidebar Content
+        sidebar_content = {
+            "popularEvents": popular_events,
+            "tags": Community.objects.values_list("tags", flat=True).distinct(),  # Get unique tags
+        }
+
+        # Construct response
+        CommunityData = {
+            "categories": list(categories),
+            "community": community_list,
+            "sidebarContent": sidebar_content,
+        }
+
+        return Response(CommunityData, status=200)
+

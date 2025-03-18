@@ -48,3 +48,21 @@ class CommentSerializer(serializers.ModelSerializer):
         """Fetch only direct replies to this comment."""
         replies = obj.replies.all()
         return CommentSerializer(replies, many=True).data     
+    
+class CommunitySerializer(serializers.ModelSerializer):
+    author = AuthorSerializer(read_only=True)
+    author_id = serializers.PrimaryKeyRelatedField(
+        queryset=Author.objects.all(), write_only=True
+    ) 
+    cover_image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Blog
+        fields = ['id', 'title', 'description', 'content', 'cover_image', 'author', 'author_id', 'date', 'category', 'tags', 'slug', 'views']
+
+    def get_cover_image(self, obj):
+        if obj.cover_image:
+            image_url = obj.cover_image.url 
+            return urljoin(settings.SITE_DOMAIN, image_url.lstrip('/'))
+        return None
+    

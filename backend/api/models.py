@@ -61,3 +61,26 @@ class Comment(models.Model):
         if self.parent:
             return f"Reply by {self.name} to {self.parent.name}"
         return f"Comment by {self.name} on {self.blog.title}"
+
+
+   
+class Community(models.Model):
+    title = models.CharField(max_length=255)
+    description = models.TextField()
+    content = models.TextField()
+    cover_image = models.ImageField(upload_to='community/', blank=True, null=True)
+    author = models.ForeignKey(Author, on_delete=models.CASCADE, related_name='community')
+    date = models.DateTimeField(auto_now_add=True)
+    category = models.CharField(max_length=100)
+    tags = models.CharField(max_length=255)
+    slug = models.SlugField(unique=True, blank=True)
+    views = models.PositiveIntegerField(default=0)
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.title)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title
+    

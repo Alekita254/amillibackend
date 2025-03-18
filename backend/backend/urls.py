@@ -6,7 +6,8 @@ from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 from api.views import (NewsletterSignupView, ContactFormView, SendCustomEmailView, AuthorListCreateView, BlogDataView,
                        AuthorDetailView, BlogListCreateView, BlogDetailView, PopularBlogsView,   CommentListCreateView,
-                       CommentDetailView, CommentLikeView, CommentDislikeView)
+                       CommentDetailView, CommentLikeView, CommentDislikeView, CommunityListCreateView, CommunityDetailView,
+                       CommunityDataView, PopularCommunityView)
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -38,6 +39,10 @@ urlpatterns = [
     path('api/comments/<int:pk>/', CommentDetailView.as_view(), name='comment_detail'),
     path('api/comments/<int:pk>/like/', CommentLikeView.as_view(), name='comment_like_detail'),
     path('api/comments/<int:pk>/dislike/', CommentDislikeView.as_view(), name='comment_dislike_detail'),
+    path('api/community/', CommunityListCreateView.as_view(), name='community_list_create'),
+    path('api/community/<slug:slug>/', CommunityDetailView.as_view(), name='community_detail'),
+    path("api/community-data/", CommunityDataView.as_view(), name="community-data"),
+    path("api/popularCommunity/", PopularCommunityView.as_view(), name="community-data"),
 
 
 
