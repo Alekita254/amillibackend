@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'corsheaders',
     # Custom Project apps
     'api',
+    'joinus',
 ]
 
 MIDDLEWARE = [
@@ -153,6 +154,19 @@ CORS_ALLOWED_ORIGINS = [
     "http://138.197.23.86:5000",
     "https://milliapi.getotech.co.ke",
 ]
+
+DEFAULT_FROM_EMAIL = 'info@getotech.co.ke'
+
+
+
+# Email settings (development)
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.zoho.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'info@getotech.co.ke'
+EMAIL_HOST_PASSWORD = 'vxzYiUKaYkqZ'
+
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.2/howto/static-files/

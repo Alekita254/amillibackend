@@ -43,6 +43,7 @@ urlpatterns = [
     path('api/community/<slug:slug>/', CommunityDetailView.as_view(), name='community_detail'),
     path("api/community-data/", CommunityDataView.as_view(), name="community-data"),
     path("api/popularCommunity/", PopularCommunityView.as_view(), name="community-data"),
+    path("api/joinus/", include("joinus.urls")),
 
 
 
