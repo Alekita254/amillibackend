@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'drf_yasg',
     'corsheaders',
+    'allauth',
     # Custom Project apps
     'api',
     'joinus',
@@ -155,9 +156,15 @@ CORS_ALLOWED_ORIGINS = [
     "https://milliapi.getotech.co.ke",
 ]
 
+AUTHENTICATION_BACKENDS = (
+    'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
+)
+
+AUTH_USER_MODEL = 'api.User' 
+
+
 DEFAULT_FROM_EMAIL = 'info@getotech.co.ke'
-
-
 
 # Email settings (development)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -179,6 +186,9 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 MEDIAFILES_DIRS = [MEDIA_ROOT]
 
-SITE_DOMAIN = "https://milliapi.getotech.co.ke"
-# SITE_DOMAIN = "http://127.0.0.1:5000"
+# SITE_DOMAIN = "https://milliapi.getotech.co.ke"
+SITE_DOMAIN = "http://127.0.0.1:5000"
 
+
+BACKEND_URL = 'http://localhost:5000' 
+FRONTEND_URL = 'http://localhost:3000'
