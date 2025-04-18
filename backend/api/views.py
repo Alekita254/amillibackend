@@ -16,6 +16,7 @@ from django.utils.encoding import force_str
 from django.shortcuts import redirect
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
+import json
 
 
 User = get_user_model()
@@ -59,35 +60,33 @@ class UserCreateView(generics.CreateAPIView):
             status_code=status.HTTP_201_CREATED
         )
 
+
 class CustomTokenObtainPairView(TokenObtainPairView):
     """
-    Authenticate user and return JWT tokens
-    Includes user data in the response
+    Authenticate user using email and return JWT tokens with user data
     """
     serializer_class = CustomTokenObtainPairSerializer
 
     def post(self, request, *args, **kwargs):
-        response = super().post(request, *args, **kwargs)
-        
-        if response.status_code == status.HTTP_200_OK:
-            user = User.objects.get(username=request.data['username'])
-            response.data = {
-                "status": True,
-                "message": "Login successful",
-                "data": {
-                    "user": {
-                        "id": user.id,
-                        "username": user.username,
-                        "email": user.email,
-                        "email_verified": user.email_verified,
-                        "first_name": user.first_name,
-                        "last_name": user.last_name
-                    },
-                    "tokens": response.data
-                }
-            }
-        return response
+        serializer = self.get_serializer(data=request.data)
 
+        try:
+            serializer.is_valid(raise_exception=True)
+        except Exception as e:
+            return Response({"status": False, "message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+        user_data = data.pop("user", {})  # remove user data from token section
+
+        return Response({
+            "status": True,
+            "message": "Login successful",
+            "data": {
+                "user": user_data,
+                "tokens": data
+            }
+        }, status=status.HTTP_200_OK)
+    
 class UserProfileView(generics.RetrieveUpdateAPIView):
     """
     Get or update authenticated user's profile
@@ -312,8 +311,14 @@ class AuthorDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 class BlogListCreateView(generics.ListCreateAPIView):
     queryset = Blog.objects.all()
-    serializer_class = BlogSerializer
+    # serializer_class = BlogSerializer
     permission_classes = [permissions.AllowAny] 
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return BlogCreateUpdateSerializer
+        return BlogSerializer
+
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
@@ -323,19 +328,44 @@ class BlogListCreateView(generics.ListCreateAPIView):
             data=response.data
         )
 
+    # def create(self, request, *args, **kwargs):
+    #     response = super().create(request, *args, **kwargs)
+    #     return custom_response(
+    #         success=True,
+    #         message="Blog created successfully",
+    #         data=response.data,
+    #         status_code=status.HTTP_201_CREATED
+    #     )
+
     def create(self, request, *args, **kwargs):
-        response = super().create(request, *args, **kwargs)
+        # Parse the JSON data field from form-data
+        json_data = json.loads(request.data.get("data", "{}"))
+
+        # Merge the file (cover_image) into the parsed data
+        if request.FILES.get("cover_image"):
+            json_data["cover_image"] = request.FILES["cover_image"]
+
+        serializer = self.get_serializer(data=json_data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+
         return custom_response(
             success=True,
             message="Blog created successfully",
-            data=response.data,
+            data=serializer.data,
             status_code=status.HTTP_201_CREATED
         )
 
 class BlogDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Blog.objects.all()
-    serializer_class = BlogSerializer
+    # serializer_class = BlogSerializer
     permission_classes = [permissions.AllowAny] 
+
+    def get_serializer_class(self):
+        if self.request.method in ['PUT', 'PATCH']:
+            return BlogCreateUpdateSerializer
+        return BlogSerializer
+
 
     def get_object(self):
         return get_object_or_404(Blog, slug=self.kwargs["slug"])  # Now it will work

@@ -11,6 +11,9 @@ from django.contrib.auth.forms import PasswordResetForm
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.contrib.auth import authenticate
+from django.utils.translation import gettext_lazy as _
+
 
 
 User = get_user_model()
@@ -70,30 +73,73 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'email_verified', 'date_joined'
         ]
 
-class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    def validate(self, attrs):
-        data = super().validate(attrs)
+# class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+#     def validate(self, attrs):
+#         data = super().validate(attrs)
         
-        if not self.user.email_verified:
-            raise serializers.ValidationError({
-                'email': 'Email not verified. Please check your inbox.'
-            })
+#         if not self.user.email_verified:
+#             raise serializers.ValidationError({
+#                 'email': 'Email not verified. Please check your inbox.'
+#             })
             
-        # Add custom claims
-        refresh = self.get_token(self.user)
-        data['refresh'] = str(refresh)
-        data['access'] = str(refresh.access_token)
-        data['user'] = UserProfileSerializer(self.user).data
+#         # Add custom claims
+#         refresh = self.get_token(self.user)
+#         data['refresh'] = str(refresh)
+#         data['access'] = str(refresh.access_token)
+#         data['user'] = UserProfileSerializer(self.user).data
         
-        return data
+#         return data
+
+#     @classmethod
+#     def get_token(cls, user):
+#         token = super().get_token(user)
+#         token['username'] = user.username
+#         token['email'] = user.email
+#         token['email_verified'] = user.email_verified
+#         return token
+
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Remove the username field added by default
+        self.fields.pop('username', None)
+
+    def validate(self, attrs):
+        email = attrs.get("email")
+        password = attrs.get("password")
+
+        user = authenticate(email=email, password=password)
+
+        if not user:
+            raise serializers.ValidationError(
+                {"detail": _("Invalid email or password.")}
+            )
+
+        if not getattr(user, "email_verified", False):
+            raise serializers.ValidationError(
+                {"email": _("Email not verified. Please check your inbox.")}
+            )
+
+        self.user = user
+        refresh = self.get_token(user)
+
+        return {
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+            "user": UserProfileSerializer(user).data,
+        }
 
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
-        token['username'] = user.username
-        token['email'] = user.email
-        token['email_verified'] = user.email_verified
+        token["email"] = user.email
+        token["email_verified"] = getattr(user, "email_verified", False)
         return token
+    
 
 class PasswordResetSerializer(serializers.Serializer):
     email = serializers.EmailField(
@@ -230,6 +276,22 @@ class BlogSerializer(serializers.ModelSerializer):
             image_url = obj.cover_image.url  # Get relative URL
             return urljoin(settings.SITE_DOMAIN, image_url.lstrip('/'))  # Force full URL
         return None
+
+class BlogCreateUpdateSerializer(serializers.ModelSerializer):
+       # This field accepts an integer PK and writes it to the Blog.author FK
+    author_id = serializers.PrimaryKeyRelatedField(
+        source="author",               # ← map this onto blog.author
+        queryset=Author.objects.all(),
+        write_only=True
+    )
+    
+    class Meta:
+        model = Blog
+        fields = [
+            'title', 'description', 'content', 'cover_image',
+            'author_id', 'category', 'tags'
+        ]
+
         
 class CommentSerializer(serializers.ModelSerializer):
     replies = serializers.SerializerMethodField()  # Fetch nested replies
