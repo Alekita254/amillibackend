@@ -17,6 +17,10 @@ from django.shortcuts import redirect
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
 import json
+from django.db.models.functions import TruncMonth
+from django.db.models import Count
+from django.utils.timezone import now
+
 
 
 User = get_user_model()
@@ -328,15 +332,7 @@ class BlogListCreateView(generics.ListCreateAPIView):
             data=response.data
         )
 
-    # def create(self, request, *args, **kwargs):
-    #     response = super().create(request, *args, **kwargs)
-    #     return custom_response(
-    #         success=True,
-    #         message="Blog created successfully",
-    #         data=response.data,
-    #         status_code=status.HTTP_201_CREATED
-    #     )
-
+    
     def create(self, request, *args, **kwargs):
         # Parse the JSON data field from form-data
         json_data = json.loads(request.data.get("data", "{}"))
@@ -648,9 +644,15 @@ class CommentDislikeView(APIView):
 
 
 class CommunityListCreateView(generics.ListCreateAPIView):
-    queryset = Blog.objects.all()
-    serializer_class = CommunitySerializer
+    queryset = Community.objects.all()
+    # serializer_class = CommunitySerializer
     permission_classes = [permissions.AllowAny] 
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return CommunityCreateUpdateSerializer
+        return CommunitySerializer
+
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
@@ -661,21 +663,37 @@ class CommunityListCreateView(generics.ListCreateAPIView):
         )
 
     def create(self, request, *args, **kwargs):
-        response = super().create(request, *args, **kwargs)
+        # Parse the JSON data field from form-data
+        json_data = json.loads(request.data.get("data", "{}"))
+
+        # Merge the file (cover_image) into the parsed data
+        if request.FILES.get("cover_image"):
+            json_data["cover_image"] = request.FILES["cover_image"]
+
+        serializer = self.get_serializer(data=json_data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+
         return custom_response(
             success=True,
             message="Community created successfully",
-            data=response.data,
+            data=serializer.data,
             status_code=status.HTTP_201_CREATED
         )
 
 class CommunityDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Blog.objects.all()
-    serializer_class = CommunitySerializer
+    queryset = Community.objects.all()
+    # serializer_class = CommunitySerializer
     permission_classes = [permissions.AllowAny] 
 
+    def get_serializer_class(self):
+        if self.request.method in ['PUT', 'PATCH']:
+            return CommunityCreateUpdateSerializer
+        return CommunitySerializer
+
+
     def get_object(self):
-        return get_object_or_404(Blog, slug=self.kwargs["slug"])
+        return get_object_or_404(Community, slug=self.kwargs["slug"])
 
     def retrieve(self, request, *args, **kwargs):
         blog = self.get_object()
@@ -762,3 +780,79 @@ class CommunityDataView(APIView):
 
         return Response(CommunityData, status=200)
 
+
+class UserProfileView(APIView):
+    permission_classes = [permissions.AllowAny]  # or IsAuthenticated if needed
+
+    def get(self, request, email):
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            return standard_response(
+                status=False,
+                message="User not found",
+                data={},
+                status_code=status.HTTP_404_NOT_FOUND
+            )
+
+        serializer = UserPublicProfileSerializer(user)
+        return standard_response(
+            status=True,
+            message="Fetched user profile successfully",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK
+        )
+
+
+class DashboardStatsView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        current_year = now().year
+
+        # 1. Monthly Blog Posts for the current year
+        monthly_blog_data = (
+            Blog.objects.filter(date__year=current_year)
+            .annotate(month=TruncMonth("date"))
+            .values("month")
+            .annotate(count=Count("id"))
+            .order_by("month")
+        )
+
+        monthly_blog_posts = {
+            entry["month"].strftime("%B"): entry["count"]
+            for entry in monthly_blog_data
+        }
+
+        # 2. Latest 5 blogs
+        latest_blogs = Blog.objects.all().order_by("-date")[:5]
+        latest_blogs_data = BlogSummarySerializer(latest_blogs, many=True).data
+
+        # 3. Community event distribution (by category)
+        community_distribution = (
+            Community.objects.values("category")
+            .annotate(count=Count("id"))
+            .order_by("-count")
+        )
+
+        # 4. Totals (optional)
+        total_blogs = Blog.objects.count()
+        total_communities = Community.objects.count()
+
+        # Construct response
+        data = {
+            "monthly_blog_posts": monthly_blog_posts,
+            "latest_blogs": latest_blogs_data,
+            "community_distribution": list(community_distribution),
+            "totals": {
+                "blogs": total_blogs,
+                "communities": total_communities,
+            }
+        }
+
+        return standard_response(
+            status=True,
+            message="Dashboard stats fetched successfully",
+            data=data,
+            status_code=status.HTTP_200_OK
+        )

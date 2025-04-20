@@ -1,8 +1,7 @@
 from rest_framework import serializers
 from django.conf import settings
 from urllib.parse import urljoin
-from .models import NewsletterSubscriber, ContactMessage, Author, Blog, Comment
-from rest_framework import serializers
+from .models import *
 from django.contrib.auth import get_user_model
 from django.utils.http import urlsafe_base64_decode
 from django.utils.encoding import force_str
@@ -13,6 +12,7 @@ from django.core.validators import validate_email
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.contrib.auth import authenticate
 from django.utils.translation import gettext_lazy as _
+from django.db.models import Sum
 
 
 
@@ -72,31 +72,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 
             'email_verified', 'date_joined'
         ]
-
-# class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-#     def validate(self, attrs):
-#         data = super().validate(attrs)
-        
-#         if not self.user.email_verified:
-#             raise serializers.ValidationError({
-#                 'email': 'Email not verified. Please check your inbox.'
-#             })
-            
-#         # Add custom claims
-#         refresh = self.get_token(self.user)
-#         data['refresh'] = str(refresh)
-#         data['access'] = str(refresh.access_token)
-#         data['user'] = UserProfileSerializer(self.user).data
-        
-#         return data
-
-#     @classmethod
-#     def get_token(cls, user):
-#         token = super().get_token(user)
-#         token['username'] = user.username
-#         token['email'] = user.email
-#         token['email_verified'] = user.email_verified
-#         return token
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -284,13 +259,27 @@ class BlogCreateUpdateSerializer(serializers.ModelSerializer):
         queryset=Author.objects.all(),
         write_only=True
     )
-    
+
     class Meta:
         model = Blog
         fields = [
             'title', 'description', 'content', 'cover_image',
             'author_id', 'category', 'tags'
         ]
+
+class BlogSummarySerializer(serializers.ModelSerializer):
+    author = AuthorSerializer(read_only=True)
+    cover_image = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Blog
+        fields = ['id', 'title', 'cover_image', 'author', 'date', 'slug', 'views']
+
+    def get_cover_image(self, obj):
+        if obj.cover_image:
+            image_url = obj.cover_image.url  # Get relative URL
+            return urljoin(settings.SITE_DOMAIN, image_url.lstrip('/'))  # Force full URL
+        return None
 
         
 class CommentSerializer(serializers.ModelSerializer):
@@ -314,7 +303,7 @@ class CommunitySerializer(serializers.ModelSerializer):
     cover_image = serializers.SerializerMethodField()
 
     class Meta:
-        model = Blog
+        model = Community
         fields = ['id', 'title', 'description', 'content', 'cover_image', 'author', 'author_id', 'date', 'category', 'tags', 'slug', 'views']
 
     def get_cover_image(self, obj):
@@ -323,3 +312,69 @@ class CommunitySerializer(serializers.ModelSerializer):
             return urljoin(settings.SITE_DOMAIN, image_url.lstrip('/'))
         return None
     
+class CommunityCreateUpdateSerializer(serializers.ModelSerializer):
+       # This field accepts an integer PK and writes it to the Blog.author FK
+    author_id = serializers.PrimaryKeyRelatedField(
+        source="author",               # ← map this onto blog.author
+        queryset=Author.objects.all(),
+        write_only=True
+    )
+
+    class Meta:
+        model = Community
+        fields = [
+            'title', 'description', 'content', 'cover_image',
+            'author_id', 'category', 'tags'
+        ]
+
+class UserPublicProfileSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    username = serializers.CharField()
+    email = serializers.EmailField()
+    full_name = serializers.SerializerMethodField()
+    date_joined = serializers.DateTimeField()
+    
+    # Author-related fields
+    bio = serializers.SerializerMethodField()
+    # website = serializers.SerializerMethodField()
+    profile_picture = serializers.SerializerMethodField()
+    total_blogs = serializers.SerializerMethodField()
+    total_communities = serializers.SerializerMethodField()
+    total_views = serializers.SerializerMethodField()
+
+    def get_full_name(self, obj):
+        return f"{obj.first_name} {obj.last_name}".strip()
+
+    def get_author(self, obj):
+        return Author.objects.filter(email__iexact=obj.email).first()
+
+    def get_bio(self, obj):
+        author = self.get_author(obj)
+        return author.bio if author else ""
+
+    def get_website(self, obj):
+        author = self.get_author(obj)
+        return author.website if author else ""
+
+    def get_profile_picture(self, obj):
+        author = self.get_author(obj)
+        if author and author.profile_picture:
+            return urljoin(settings.SITE_DOMAIN, author.profile_picture.url.lstrip("/"))
+        return None
+
+    def get_total_blogs(self, obj):
+        author = self.get_author(obj)
+        return Blog.objects.filter(author=author).count() if author else 0
+
+    def get_total_communities(self, obj):
+        author = self.get_author(obj)
+        return Community.objects.filter(author=author).count() if author else 0
+
+    def get_total_views(self, obj):
+        author = self.get_author(obj)
+        if not author:
+            return 0
+        blog_views = Blog.objects.filter(author=author).aggregate(total=Sum('views'))['total'] or 0
+        community_views = Community.objects.filter(author=author).aggregate(total=Sum('views'))['total'] or 0
+        return blog_views + community_views
+
