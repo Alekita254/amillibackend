@@ -156,7 +156,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://amilliontechies.com", 
     "http://138.197.23.86:5000",
     "https://millibackend.amilliontechies.com",
-    "http://54.164.100.151/"
+    "http://54.164.100.151"
 ]
 
 AUTHENTICATION_BACKENDS = (
