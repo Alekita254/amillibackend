@@ -153,7 +153,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5000", 
     "https://amilliontechies.com", 
     "http://138.197.23.86:5000",
-    "https://milliapi.getotech.co.ke",
+    "https://millibackend.amilliontechies.com",
+    "http://54.164.100.151/"
 ]
 
 AUTHENTICATION_BACKENDS = (
