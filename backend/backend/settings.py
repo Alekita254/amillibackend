@@ -20,6 +20,8 @@ ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
     "milliapi.getotech.co.ke",
+    "54.164.100.151",
+    "millibackend.amilliontechies.com",
 ]
 
 
