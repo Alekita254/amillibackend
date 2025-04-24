@@ -16,7 +16,7 @@ SECRET_KEY = 'django-insecure-yj&iq=svp^7kl9=e%!$)29^r&)6o9az8v8(c9-id%b)fmw672a
 DEBUG = True
 
 ALLOWED_HOSTS = [
-    "138.197.23.86",
+    "137.184.149.59",
     "localhost",
     "127.0.0.1",
     "milliapi.getotech.co.ke",
@@ -154,7 +154,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000", 
     "http://127.0.0.1:5000", 
     "https://amilliontechies.com", 
-    "http://138.197.23.86:5000",
+    "http://137.184.149.59",
     "https://millibackend.amilliontechies.com",
     "http://54.164.100.151"
 ]
