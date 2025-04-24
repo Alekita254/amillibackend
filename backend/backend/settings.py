@@ -159,6 +159,12 @@ CORS_ALLOWED_ORIGINS = [
     "http://54.164.100.151"
 ]
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://millibackend.amilliontechies.com",
+    "http://137.184.149.59",
+    "http://54.164.100.151",
+]
+
 AUTHENTICATION_BACKENDS = (
     'api.backends.EmailBackend', 
     'django.contrib.auth.backends.ModelBackend',
