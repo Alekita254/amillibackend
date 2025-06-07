@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-yj&iq=svp^7kl9=e%!$)29^r&)6o9az8v8(c9-id%b)fmw672a'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = [
     "137.184.149.59",
@@ -197,9 +197,9 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 MEDIAFILES_DIRS = [MEDIA_ROOT]
 
-# SITE_DOMAIN = "https://milliapi.getotech.co.ke"
-SITE_DOMAIN = "http://127.0.0.1:5000"
+SITE_DOMAIN = "https://millibackend.amilliontechies.com"
+# SITE_DOMAIN = "http://127.0.0.1:5000"
 
 
-BACKEND_URL = 'http://localhost:5000' 
-FRONTEND_URL = 'http://localhost:3000'
+BACKEND_URL = 'https://millibackend.amilliontechies.com' 
+FRONTEND_URL = 'https://amilliontechies.com'
