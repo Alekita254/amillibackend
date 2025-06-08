@@ -8,6 +8,7 @@ from django.utils.http import urlsafe_base64_encode
 from django.utils.encoding import force_bytes
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.text import slugify
+import datetime
 
 
 class User(AbstractUser):
@@ -42,9 +43,12 @@ class User(AbstractUser):
         subject = 'Verify Your Email Address'
         html_message = render_to_string('email_verification.html', {
             'user': self,
+            'username': self.username,
+            'full_name': f"{self.first_name} {self.last_name}".strip() or self.username,
             'verification_url': verification_url,
+            'year': datetime.datetime.now().year,
         })
-        plain_message = f"Please verify your email: {verification_url}"
+        plain_message = f"Hi {self.username},\nPlease verify your email: {verification_url}"
         
         send_mail(
             subject,
@@ -139,4 +143,3 @@ class Community(models.Model):
 
     def __str__(self):
         return self.title
-    
