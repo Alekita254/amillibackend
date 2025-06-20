@@ -436,7 +436,7 @@ class BlogDataView(APIView):
         # Fetch top 5 most popular blogs by views
         popular_blogs = Blog.objects.all().order_by('-views')[:5]
         popular_posts = [
-            {"id": blog.id, "title": blog.title, "link": f"/blog/{blog.slug}/"}
+            {"id": blog.id, "title": blog.title, "slug": blog.slug, "link": f"/blog/{blog.slug}/"}
             for blog in popular_blogs
         ]
 
