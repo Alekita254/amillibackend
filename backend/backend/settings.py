@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-yj&iq=svp^7kl9=e%!$)29^r&)6o9az8v8(c9-id%b)fmw672a'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-# DEBUG = True
+#DEBUG = True
 DEBUG = False
 
 
@@ -26,6 +26,7 @@ ALLOWED_HOSTS = [
     "millibackend.amilliontechies.com",
 ]
 
+#ALLOWED_HOSTS = ["*"]
 
 # Application definition
 
@@ -177,15 +178,15 @@ AUTHENTICATION_BACKENDS = (
 AUTH_USER_MODEL = 'api.User' 
 
 
-DEFAULT_FROM_EMAIL = 'info@getotech.co.ke'
+DEFAULT_FROM_EMAIL = 'info@amiliontechies.com'
 
 # Email settings (development)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.zoho.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'info@getotech.co.ke'
-EMAIL_HOST_PASSWORD = 'vxzYiUKaYkqZ'
+EMAIL_HOST_USER = 'info@amilliontechies.com'
+EMAIL_HOST_PASSWORD = 'eDihLLkla6KW'
 
 
 # Static files (CSS, JavaScript, Images)

@@ -78,7 +78,12 @@ class JoinUsSubmissionView(generics.CreateAPIView):
 
             email = EmailMultiAlternatives(subject, text_content, from_email, to_email)
             email.attach_alternative(html_content, "text/html")
-            email.send()
+           # email.send()
+            try:
+                email.send()
+            except Exception as e:
+                print("Email sending failed: ", e)
+
 
             return custom_response(
                 success=True,
