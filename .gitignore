@@ -14,8 +14,6 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Django-specific
-*.sqlite3
-db.sqlite3
 /media/
 staticfiles/
 *.log
