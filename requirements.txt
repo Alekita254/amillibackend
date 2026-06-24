@@ -1,5 +1,5 @@
 asgiref==3.8.1
-Django==5.1.7
+Django==5.2.15
 django-allauth==65.7.0
 django-cors-headers==4.7.0
 django-jazzmin==3.0.1
