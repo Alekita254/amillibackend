@@ -4,6 +4,39 @@ from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR.parent / ".env")
+
+
+def env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return int(value)
+
+
+def env_list(name, default=None, merge_default=False):
+    value = os.environ.get(name)
+    default_list = default or []
+    if value is None:
+        return default_list
+
+    env_values = [item.strip() for item in value.split(",") if item.strip()]
+    if not merge_default:
+        return env_values
+
+    # Keep defaults and append env values without duplicates.
+    merged = list(default_list)
+    for item in env_values:
+        if item not in merged:
+            merged.append(item)
+    return merged
 
 
 # Quick-start development settings - unsuitable for production
@@ -46,6 +79,7 @@ INSTALLED_APPS = [
     # Custom Project apps
     'api',
     'joinus',
+    'cohorts',
 ]
 
 MIDDLEWARE = [
@@ -153,16 +187,25 @@ JAZZMIN_SETTINGS = {
 CORS_ALLOW_ALL_ORIGINS = True  # Allows all domains to access your API
 
 # OR for specific domains (recommended for production)
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000", 
-    "http://127.0.0.1:5000", 
-    "https://amilliontechies.com", 
+CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5000",
+    "https://amilliontechies.com",
     "http://137.184.149.59",
     "https://millibackend.amilliontechies.com",
-    "http://54.164.100.151"
+    "http://54.164.100.151",
+], merge_default=True)
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https?://localhost(:\d+)?$",
+    r"^https?://127\.0\.0\.1(:\d+)?$",
 ]
 
-CSRF_TRUSTED_ORIGINS = [
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
     "https://millibackend.amilliontechies.com",
     "http://137.184.149.59",
     "http://54.164.100.151",
@@ -208,3 +251,4 @@ BACKEND_URL = 'https://millibackend.amilliontechies.com'
 # BACKEND_URL = 'http:127.0.0.1:5000' 
 FRONTEND_URL = 'https://amilliontechies.com'
 # FRONTEND_URL = 'http:127.0.0.1:5173'
+

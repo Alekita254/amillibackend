@@ -48,6 +48,7 @@ urlpatterns = [
     path("api/popularCommunity/", PopularCommunityView.as_view(), name="community-data"),
     path('api/user/profile/<str:email>/', UserProfileView.as_view(), name='user-profile'),
     path("api/dashboard/stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
+    path("api/", include("cohorts.urls")),
 
     
     path("api/joinus/", include("joinus.urls")),
