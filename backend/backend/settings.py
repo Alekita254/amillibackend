@@ -1,6 +1,7 @@
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -209,7 +210,7 @@ CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", [
     "https://millibackend.amilliontechies.com",
     "http://137.184.149.59",
     "http://54.164.100.151",
-]
+])
 
 AUTHENTICATION_BACKENDS = (
     'api.backends.EmailBackend', 
