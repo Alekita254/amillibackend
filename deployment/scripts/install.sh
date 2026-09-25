@@ -2,17 +2,29 @@
 set -euo pipefail
 
 PROJECT_ROOT="/var/www/projects/amilliontechies"
-DEPLOYMENT_ROOT="$PROJECT_ROOT/backend/deployment"
+BACKEND_ROOT="$PROJECT_ROOT/backend"
+SERVICE_TEMPLATE="$BACKEND_ROOT/deployment/systemd/amilliontechies-backend.service.example"
+NGINX_TEMPLATE="$BACKEND_ROOT/deployment/nginx/amilliontechies.conf.example"
+SERVICE_TARGET="/etc/systemd/system/amilliontechies-backend.service"
+NGINX_TARGET="/etc/nginx/conf.d/amilliontechies.conf"
 
 if [ "$EUID" -ne 0 ]; then
-  echo "This script must be run as root (use sudo)."
+  echo "This script must be run with sudo" >&2
   exit 1
 fi
 
-install -m 0644 "$DEPLOYMENT_ROOT/systemd/amilliontechies-backend.service.example" /etc/systemd/system/amilliontechies-backend.service
-install -m 0644 "$DEPLOYMENT_ROOT/nginx/amilliontechies.conf.example" /etc/nginx/conf.d/amilliontechies.conf
+mkdir -p /etc/systemd/system /etc/nginx/conf.d "$BACKEND_ROOT/staticfiles" "$BACKEND_ROOT/media"
+
+install -m 644 "$SERVICE_TEMPLATE" "$SERVICE_TARGET"
+install -m 644 "$NGINX_TEMPLATE" "$NGINX_TARGET"
 
 systemctl daemon-reload
-systemctl enable amilliontechies-backend.service
+systemctl enable --now amilliontechies-backend
+
+if command -v nginx >/dev/null 2>&1; then
+  nginx -t
+  systemctl reload nginx || true
+fi
 
 echo "Deployment templates installed."
+echo "Next: ensure Nginx is installed, then verify the service and the nginx config."
