@@ -106,3 +106,40 @@ class TokenRefreshTests(TestCase):
         self.assertEqual(r.status_code, 200, r.content)
         self.assertIn('access', r.json())
         self.assertEqual(c.post('/api/token/refresh/', {'refresh': 'garbage'}, format='json').status_code, 401)
+
+
+import io
+import shutil
+import tempfile
+from PIL import Image
+from django.core.files.uploadedfile import SimpleUploadedFile
+
+_MEDIA = tempfile.mkdtemp()
+
+
+@override_settings(MEDIA_ROOT=_MEDIA, ALLOWED_HOSTS=['testserver'])
+class ImageUploadTests(TestCase):
+    """Exercises Pillow through Django's ImageField (guards dependency upgrades)."""
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(_MEDIA, ignore_errors=True)
+
+    def png(self):
+        buf = io.BytesIO()
+        Image.new('RGB', (8, 8), 'green').save(buf, 'PNG')
+        return SimpleUploadedFile('cover.png', buf.getvalue(), content_type='image/png')
+
+    def test_blog_cover_upload_and_rejection_of_non_image(self):
+        staff = User.objects.create_user('s', 's@x.com', 'pass12345', is_staff=True)
+        author = Author.objects.create(name='A', email='a@x.com')
+        c = APIClient()
+        c.force_authenticate(staff)
+        data = json.dumps({'title': 'T', 'description': 'd', 'content': 'c',
+                           'author_id': author.pk, 'category': 'c', 'tags': 't'})
+        ok = c.post('/api/blogs/', {'data': data, 'cover_image': self.png()}, format='multipart')
+        self.assertEqual(ok.status_code, 201, ok.content)
+        self.assertTrue(ok.json()['data']['cover_image'].endswith('.png'))
+        bad = c.post('/api/blogs/', {'data': data, 'cover_image': SimpleUploadedFile('x.png', b'not an image')}, format='multipart')
+        self.assertEqual(bad.status_code, 400)
