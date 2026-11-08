@@ -258,3 +258,173 @@ class PeopleTests(TestCase):
         self.cohort.published = False
         self.cohort.save()
         self.assertEqual(self.client.get(self.url).status_code, 404)
+
+
+FULL_APPROVE_MSG = "Cohort is full. Raise the capacity first."
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class MemberApiTests(TestCase):
+    def setUp(self):
+        self.cohort = make_cohort("Alpha")
+        self.other = make_cohort("Beta")
+        self.base = "/api/cohorts/alpha/members/"
+        self.anon = APIClient()
+        self.staff = staff_client()
+        plain = User.objects.create_user("plain", "plain@x.com", "pass12345")
+        self.plain = APIClient()
+        self.plain.force_authenticate(plain)
+
+    def url(self, member):
+        return f"{self.base}{member.pk}/"
+
+    def patch(self, member, **data):
+        return self.staff.patch(self.url(member), data, format="json")
+
+    def test_members_api_is_staff_only_for_every_method(self):
+        m = add(self.cohort, "a@x.com")
+        calls = [
+            lambda c: c.get(self.base),
+            lambda c: c.post(self.base, reg_payload(email="n@x.com"), format="json"),
+            lambda c: c.patch(self.url(m), {"admin_note": "x"}, format="json"),
+            lambda c: c.delete(self.url(m)),
+        ]
+        for call in calls:
+            self.assertEqual(call(self.anon).status_code, 401)
+            self.assertEqual(call(self.plain).status_code, 403)
+        self.assertTrue(CohortMembership.objects.filter(pk=m.pk).exists())
+
+    def test_list_filters_by_role_and_status(self):
+        add(self.cohort, "a@x.com")
+        add(self.cohort, "p@x.com", status=PENDING)
+        add(self.cohort, "m@x.com", role=MENTOR)
+        add(self.other, "other@x.com")
+        emails = lambda q: sorted(x["email"] for x in self.staff.get(self.base + q).json()["data"])
+        self.assertEqual(emails(""), ["a@x.com", "m@x.com", "p@x.com"])
+        self.assertEqual(emails("?role=MENTOR"), ["m@x.com"])
+        self.assertEqual(emails("?status=PENDING"), ["p@x.com"])
+        self.assertEqual(emails("?role=MENTEE&status=APPROVED"), ["a@x.com"])
+
+    def test_approving_sets_decided_at_and_emails_once(self):
+        m = add(self.cohort, "a@x.com", status=PENDING)
+        self.assertEqual(self.patch(m, status="APPROVED").status_code, 200)
+        m.refresh_from_db()
+        self.assertEqual(m.status, APPROVED)
+        self.assertIsNotNone(m.decided_at)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["a@x.com"])
+        self.assertIn("You're in", mail.outbox[0].subject)
+        self.patch(m, status="APPROVED", admin_note="same status again")
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_rejecting_emails_the_applicant(self):
+        m = add(self.cohort, "a@x.com", status=PENDING)
+        self.patch(m, status="REJECTED")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Update on your application", mail.outbox[0].subject)
+
+    def test_admin_can_add_an_approved_member_without_email(self):
+        r = self.staff.post(self.base, reg_payload(email="new@x.com", role="MENTOR"), format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        m = CohortMembership.objects.get(email="new@x.com")
+        self.assertEqual(m.status, APPROVED)
+        self.assertIsNotNone(m.decided_at)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_adding_works_even_when_registration_is_closed(self):
+        self.cohort.registration_open = False
+        self.cohort.save()
+        r = self.staff.post(self.base, reg_payload(email="new@x.com"), format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def test_duplicate_email_is_rejected_on_add_and_edit(self):
+        add(self.cohort, "a@x.com")
+        b = add(self.cohort, "b@x.com")
+        dup = self.staff.post(self.base, reg_payload(email=" A@x.com"), format="json")
+        self.assertEqual((dup.status_code, dup.json()["message"]), (400, DUPLICATE_MSG))
+        self.assertEqual(self.patch(b, email="a@x.com").status_code, 400)
+
+    def test_assigning_an_approved_mentor_of_the_same_cohort(self):
+        mentor = add(self.cohort, "m@x.com", role=MENTOR)
+        mentee = add(self.cohort, "a@x.com")
+        r = self.patch(mentee, mentor=mentor.pk)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["data"]["mentor_name"], mentor.full_name)
+        self.assertEqual(self.patch(mentee, mentor=None).status_code, 200)
+        mentee.refresh_from_db()
+        self.assertIsNone(mentee.mentor)
+
+    def test_invalid_mentors_are_rejected(self):
+        mentee = add(self.cohort, "a@x.com")
+        other_cohort_mentor = add(self.other, "om@x.com", role=MENTOR)
+        pending_mentor = add(self.cohort, "pm@x.com", role=MENTOR, status=PENDING)
+        rejected_mentor = add(self.cohort, "rm@x.com", role=MENTOR, status=REJECTED)
+        another_mentee = add(self.cohort, "b@x.com")
+        for bad in (other_cohort_mentor, pending_mentor, rejected_mentor, another_mentee):
+            self.assertEqual(self.patch(mentee, mentor=bad.pk).status_code, 400, bad.email)
+        mentor = add(self.cohort, "m@x.com", role=MENTOR)
+        self.assertEqual(self.patch(mentor, mentor=pending_mentor.pk).status_code, 400)  # mentors have no mentor
+        mentee.refresh_from_db()
+        self.assertIsNone(mentee.mentor)
+
+    def test_approving_beyond_capacity_is_blocked_until_capacity_is_raised(self):
+        self.cohort.capacity = 1
+        self.cohort.save()
+        first = add(self.cohort, "a@x.com", status=PENDING)
+        second = add(self.cohort, "b@x.com", status=PENDING)
+        self.assertEqual(self.patch(first, status="APPROVED").status_code, 200)
+        blocked = self.patch(second, status="APPROVED")
+        self.assertEqual((blocked.status_code, blocked.json()["message"]), (400, FULL_APPROVE_MSG))
+        second.refresh_from_db()
+        self.assertEqual(second.status, PENDING)
+        self.cohort.capacity = 2
+        self.cohort.save()
+        self.assertEqual(self.patch(second, status="APPROVED").status_code, 200)
+
+    def test_adding_an_approved_mentee_to_a_full_cohort_is_blocked(self):
+        self.cohort.capacity = 1
+        self.cohort.save()
+        add(self.cohort, "a@x.com")
+        r = self.staff.post(self.base, reg_payload(email="n@x.com"), format="json")
+        self.assertEqual((r.status_code, r.json()["message"]), (400, FULL_APPROVE_MSG))
+        self.assertEqual(self.staff.post(self.base, reg_payload(email="m@x.com", role="MENTOR"), format="json").status_code, 201)
+
+    def _mentor_with_mentee(self):
+        mentor = add(self.cohort, "m@x.com", role=MENTOR)
+        mentee = add(self.cohort, "a@x.com", mentor=mentor)
+        return mentor, mentee
+
+    def test_demoting_or_rejecting_a_mentor_unassigns_their_mentees(self):
+        for change in ({"role": "MENTEE"}, {"status": "REJECTED"}):
+            CohortMembership.objects.all().delete()
+            mentor, mentee = self._mentor_with_mentee()
+            self.assertEqual(self.patch(mentor, **change).status_code, 200, change)
+            mentee.refresh_from_db()
+            self.assertIsNone(mentee.mentor, change)
+            self.assertEqual(mentee.status, APPROVED)
+
+    def test_deleting_a_mentor_leaves_mentees_approved_and_unassigned(self):
+        mentor, mentee = self._mentor_with_mentee()
+        self.assertEqual(self.staff.delete(self.url(mentor)).status_code, 200)
+        mentee.refresh_from_db()
+        self.assertEqual((mentee.mentor, mentee.status), (None, APPROVED))
+
+    def test_changing_a_mentee_with_a_mentor_into_a_mentor_clears_their_mentor(self):
+        _, mentee = self._mentor_with_mentee()
+        self.assertEqual(self.patch(mentee, role="MENTOR").status_code, 200)
+        mentee.refresh_from_db()
+        self.assertEqual((mentee.role, mentee.mentor), (MENTOR, None))
+
+    def test_a_member_of_another_cohort_is_404(self):
+        own = add(self.cohort, "own@x.com")
+        self.assertEqual(self.staff.get(self.url(own)).status_code, 200)  # route works for the right cohort
+        outsider = add(self.other, "o@x.com")
+        self.assertEqual(self.staff.get(self.url(outsider)).status_code, 404)
+        self.assertEqual(self.patch(outsider, admin_note="x").status_code, 404)
+        self.assertEqual(self.staff.delete(self.url(outsider)).status_code, 404)
+
+    def test_staff_can_manage_members_of_an_unpublished_cohort(self):
+        self.cohort.published = False
+        self.cohort.save()
+        add(self.cohort, "a@x.com")
+        self.assertEqual(len(self.staff.get(self.base).json()["data"]), 1)

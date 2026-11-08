@@ -23,3 +23,26 @@ def send_application_received(m):
         "— The A Million Techies team",
         m.email,
     )
+
+
+def send_decision(m):
+    """Email the applicant when an admin approves or rejects them. Other statuses send nothing."""
+    if m.status == m.STATUS_APPROVED:
+        mentor = f" Your mentor is {m.mentor.full_name}." if m.mentor_id else ""
+        _send(
+            f"You're in: {m.cohort.title}",
+            f"Hi {m.full_name},\n\n"
+            f"Good news: your application to {m.cohort.title} as a {m.get_role_display().lower()} "
+            f"has been approved.{mentor} We'll be in touch with next steps.\n\n"
+            "— The A Million Techies team",
+            m.email,
+        )
+    elif m.status == m.STATUS_REJECTED:
+        _send(
+            f"Update on your application: {m.cohort.title}",
+            f"Hi {m.full_name},\n\n"
+            f"Thank you for applying to {m.cohort.title}. Unfortunately we can't offer you a place "
+            "this time. We appreciate your interest and hope you'll apply again.\n\n"
+            "— The A Million Techies team",
+            m.email,
+        )

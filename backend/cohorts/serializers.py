@@ -88,3 +88,66 @@ class PublicPersonSerializer(serializers.ModelSerializer):
     class Meta:
         model = CohortMembership
         fields = ["id", "role", "full_name", "headline", "about"]
+
+
+FULL_APPROVE_MESSAGE = "Cohort is full. Raise the capacity first."
+
+
+class MembershipSerializer(serializers.ModelSerializer):
+    """Staff view of a member. The cohort comes in through the serializer context."""
+
+    mentor = serializers.PrimaryKeyRelatedField(
+        queryset=CohortMembership.objects.all(), allow_null=True, required=False
+    )
+    mentor_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CohortMembership
+        fields = [
+            "id", "role", "status", "full_name", "email", "phone", "location", "headline",
+            "about", "expertise", "linkedin", "show_publicly", "mentor", "mentor_name",
+            "admin_note", "created_at", "decided_at",
+        ]
+        read_only_fields = ["id", "created_at", "decided_at"]
+
+    def get_mentor_name(self, obj):
+        return obj.mentor.full_name if obj.mentor_id else None
+
+    def validate(self, attrs):
+        cohort, inst = self.context["cohort"], self.instance
+        M = CohortMembership
+
+        # A member added directly by staff is approved unless they say otherwise.
+        if inst is None and "status" not in self.initial_data:
+            attrs["status"] = M.STATUS_APPROVED
+
+        role = attrs.get("role", inst.role if inst else None)
+        status = attrs.get("status", inst.status if inst else None)
+
+        if "email" in attrs:
+            clash = M.objects.filter(cohort=cohort, email__iexact=attrs["email"].strip())
+            if inst:
+                clash = clash.exclude(pk=inst.pk)
+            if clash.exists():
+                raise serializers.ValidationError(DUPLICATE_MESSAGE)
+
+        # Mentors don't have mentors; turning someone into a mentor drops theirs.
+        if role == M.ROLE_MENTOR:
+            if attrs.get("mentor"):
+                raise serializers.ValidationError("Only mentees can have a mentor.")
+            attrs["mentor"] = None
+
+        mentor = attrs.get("mentor", inst.mentor if inst else None)
+        if mentor and (
+            mentor.cohort_id != cohort.id
+            or mentor.role != M.ROLE_MENTOR
+            or mentor.status != M.STATUS_APPROVED
+        ):
+            raise serializers.ValidationError("Mentor must be an approved mentor of this cohort.")
+
+        # Capacity: only an approved mentee takes a seat.
+        takes_seat = role == M.ROLE_MENTEE and status == M.STATUS_APPROVED
+        had_seat = bool(inst) and inst.role == M.ROLE_MENTEE and inst.status == M.STATUS_APPROVED
+        if takes_seat and not had_seat and cohort.capacity is not None and cohort.seats_taken >= cohort.capacity:
+            raise serializers.ValidationError(FULL_APPROVE_MESSAGE)
+        return attrs
