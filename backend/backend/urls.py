@@ -21,11 +21,11 @@ schema_view = get_schema_view(
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/register/', UserCreateView.as_view(), name='user-register'),
-    path('api/profile/', UserProfileView.as_view(), name='user-profile'),
+    path('api/profile/', MyProfileView.as_view(), name='user-profile'),
     path('api/token/', CustomTokenObtainPairView.as_view(), name='token-obtain-pair'),
     path('api/password-reset/', PasswordResetView.as_view(), name='password-reset'),
     path('api/password-reset-confirm/', PasswordResetConfirmView.as_view(), name='password-reset-confirm'),
-    path('aoi/verify-email/', EmailVerificationView.as_view(), name='verify-email'),
+    path('api/verify-email/', EmailVerificationView.as_view(), name='verify-email'),
     # path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     # path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/newsletter/', NewsletterSignupView.as_view(), name='newsletter_signup'),
@@ -46,7 +46,7 @@ urlpatterns = [
     path('api/community/<slug:slug>/', CommunityDetailView.as_view(), name='community_detail'),
     path("api/community-data/", CommunityDataView.as_view(), name="community-data"),
     path("api/popularCommunity/", PopularCommunityView.as_view(), name="community-data"),
-    path('api/user/profile/<str:email>/', UserProfileView.as_view(), name='user-profile'),
+    path('api/user/profile/<str:email>/', UserPublicProfileView.as_view(), name='user-public-profile'),
     path("api/dashboard/stats/", DashboardStatsView.as_view(), name="dashboard-stats"),
     path("api/", include("cohorts.urls")),
 

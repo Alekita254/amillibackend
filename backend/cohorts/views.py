@@ -2,13 +2,22 @@ from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, status
 from cohorts.models import Cohort
 from cohorts.serializers import CohortSerializer
+from api.permissions import IsStaffOrReadOnly
 from api.utils import custom_response
 
 
-class CohortListCreateView(generics.ListCreateAPIView):
+class PublishedForPublicMixin:
+    """Drafts (published=False) are visible to staff only."""
+
+    def get_queryset(self):
+        qs = Cohort.objects.all()
+        return qs if self.request.user.is_staff else qs.filter(published=True)
+
+
+class CohortListCreateView(PublishedForPublicMixin, generics.ListCreateAPIView):
     queryset = Cohort.objects.all()
     serializer_class = CohortSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsStaffOrReadOnly]
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
@@ -29,13 +38,13 @@ class CohortListCreateView(generics.ListCreateAPIView):
         )
 
 
-class CohortDetailView(generics.RetrieveUpdateDestroyAPIView):
+class CohortDetailView(PublishedForPublicMixin, generics.RetrieveUpdateDestroyAPIView):
     queryset = Cohort.objects.all()
     serializer_class = CohortSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsStaffOrReadOnly]
 
     def get_object(self):
-        return get_object_or_404(Cohort, slug=self.kwargs["slug"])
+        return get_object_or_404(self.get_queryset(), slug=self.kwargs["slug"])
 
     def retrieve(self, request, *args, **kwargs):
         response = super().retrieve(request, *args, **kwargs)

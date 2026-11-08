@@ -23,7 +23,30 @@ from django.utils.timezone import now
 
 
 
+import logging
+from rest_framework.throttling import ScopedRateThrottle
+from django.db.models import F
+from rest_framework.exceptions import ValidationError
+from .permissions import IsStaffOrReadOnly
+
+logger = logging.getLogger(__name__)
 User = get_user_model()
+
+def _create_payload(request):
+    """Multipart forms carry the fields as a JSON string in `data`; plain JSON posts are used as-is."""
+    raw = request.data.get("data")
+    if raw is None:
+        return request.data
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        raise ValidationError({"data": "Must be valid JSON."})
+    if not isinstance(payload, dict):
+        raise ValidationError({"data": "Must be a JSON object."})
+    if request.FILES.get("cover_image"):
+        payload["cover_image"] = request.FILES["cover_image"]
+    return payload
+
 
 def standard_response(status=True, message="", data=None, status_code=status.HTTP_200_OK):
     """Standardized API response format"""
@@ -42,12 +65,17 @@ class UserCreateView(generics.CreateAPIView):
     serializer_class = UserSerializer
     authentication_classes = []
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'email'
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        user.send_verification_email()
+        try:
+            user.send_verification_email()
+        except Exception:
+            logger.exception("Verification email failed for user %s", user.pk)
         
         refresh = RefreshToken.for_user(user)
         
@@ -91,7 +119,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             }
         }, status=status.HTTP_200_OK)
     
-class UserProfileView(generics.RetrieveUpdateAPIView):
+class MyProfileView(generics.RetrieveUpdateAPIView):
     """
     Get or update authenticated user's profile
     """
@@ -129,6 +157,8 @@ class PasswordResetView(generics.GenericAPIView):
     """
     serializer_class = PasswordResetSerializer
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'email'
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -236,22 +266,22 @@ class ContactFormView(generics.CreateAPIView):
         )
 
 class SendCustomEmailView(APIView):
-    
-    permission_classes = [permissions.AllowAny] 
+    permission_classes = [permissions.IsAdminUser]
 
     def post(self, request):
         subject = request.data.get('subject')
         message = request.data.get('message')
         recipient_list = request.data.get('recipients', [])
 
-        if not subject or not message or not recipient_list:
+        if (not subject or not message or not isinstance(recipient_list, list)
+                or not recipient_list or len(recipient_list) > 50):
             return custom_response(
                 success=False,
-                message="Missing required fields",
+                message="subject, message and 1-50 recipients are required",
                 status_code=status.HTTP_400_BAD_REQUEST
             )
 
-        send_mail(subject, message, 'your_email@example.com', recipient_list)
+        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, recipient_list)
 
         return custom_response(
             success=True,
@@ -262,7 +292,7 @@ class SendCustomEmailView(APIView):
 class AuthorListCreateView(generics.ListCreateAPIView):
     queryset = Author.objects.all()
     serializer_class = AuthorSerializer
-    permission_classes = [permissions.AllowAny] 
+    permission_classes = [IsStaffOrReadOnly]
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
@@ -286,7 +316,7 @@ class AuthorListCreateView(generics.ListCreateAPIView):
 class AuthorDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Author.objects.all()
     serializer_class = AuthorSerializer
-    permission_classes = [permissions.AllowAny] 
+    permission_classes = [IsStaffOrReadOnly]
 
     def retrieve(self, request, *args, **kwargs):
         response = super().retrieve(request, *args, **kwargs)
@@ -314,9 +344,9 @@ class AuthorDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 class BlogListCreateView(generics.ListCreateAPIView):
-    queryset = Blog.objects.all()
+    queryset = Blog.objects.select_related("author")
     # serializer_class = BlogSerializer
-    permission_classes = [permissions.AllowAny] 
+    permission_classes = [IsStaffOrReadOnly]
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -334,28 +364,21 @@ class BlogListCreateView(generics.ListCreateAPIView):
 
     
     def create(self, request, *args, **kwargs):
-        # Parse the JSON data field from form-data
-        json_data = json.loads(request.data.get("data", "{}"))
-
-        # Merge the file (cover_image) into the parsed data
-        if request.FILES.get("cover_image"):
-            json_data["cover_image"] = request.FILES["cover_image"]
-
-        serializer = self.get_serializer(data=json_data)
+        serializer = self.get_serializer(data=_create_payload(request))
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
 
         return custom_response(
             success=True,
             message="Blog created successfully",
-            data=serializer.data,
+            data=BlogSerializer(serializer.instance, context=self.get_serializer_context()).data,
             status_code=status.HTTP_201_CREATED
         )
 
 class BlogDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Blog.objects.all()
+    queryset = Blog.objects.select_related("author")
     # serializer_class = BlogSerializer
-    permission_classes = [permissions.AllowAny] 
+    permission_classes = [IsStaffOrReadOnly]
 
     def get_serializer_class(self):
         if self.request.method in ['PUT', 'PATCH']:
@@ -367,10 +390,9 @@ class BlogDetailView(generics.RetrieveUpdateDestroyAPIView):
         return get_object_or_404(Blog, slug=self.kwargs["slug"])  # Now it will work
 
     def retrieve(self, request, *args, **kwargs):
-        blog = self.get_object()
-        blog.views += 1
-        blog.save(update_fields=["views"])
-        
+        self.get_object()  # 404 if missing
+        self.get_queryset().filter(slug=kwargs["slug"]).update(views=F("views") + 1)
+
         response = super().retrieve(request, *args, **kwargs)
         return custom_response(
             success=True,
@@ -416,7 +438,7 @@ class BlogDataView(APIView):
         categories = Blog.objects.values_list("category", flat=True).distinct()
 
         # Get all blogs
-        blogs = Blog.objects.all().order_by('-date')  # Latest blogs first
+        blogs = Blog.objects.select_related("author").order_by('-date')  # Latest blogs first
         serialized_blogs = BlogSerializer(blogs, many=True).data
 
         # Format blog list
@@ -465,10 +487,10 @@ class CommentListCreateView(APIView):
     def get(self, request, postId=None):
         try:
             # Filter comments by blog ID if postId is provided
+            # Top-level only: replies come nested inside their parent
+            comments = Comment.objects.filter(parent__isnull=True).prefetch_related('replies').order_by('-created_at')
             if postId:
-                comments = Comment.objects.filter(blog=postId).order_by('-created_at')
-            else:
-                comments = Comment.objects.all().order_by('-created_at')
+                comments = comments.filter(blog=postId)
 
             serialized_comments = CommentSerializer(comments, many=True).data
 
@@ -497,9 +519,10 @@ class CommentListCreateView(APIView):
             }
             return Response(response_data, status=status.HTTP_200_OK)
 
-        except Exception as e:
+        except Exception:
+            logger.exception("Comment request failed")
             return Response(
-                {"message": "Failed to fetch comments", "error": str(e), "status": status.HTTP_500_INTERNAL_SERVER_ERROR},
+                {"message": "Failed to fetch comments", "status": status.HTTP_500_INTERNAL_SERVER_ERROR},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -522,9 +545,10 @@ class CommentListCreateView(APIView):
                     {"message": "Invalid data", "errors": serializer.errors, "status": status.HTTP_400_BAD_REQUEST},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        except Exception as e:
+        except Exception:
+            logger.exception("Comment request failed")
             return Response(
-                {"message": "Failed to create comment", "error": str(e), "status": status.HTTP_500_INTERNAL_SERVER_ERROR},
+                {"message": "Failed to create comment", "status": status.HTTP_500_INTERNAL_SERVER_ERROR},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -534,6 +558,10 @@ class CommentDetailView(APIView):
     Retrieve, update, or delete a single comment.
     """
     permission_classes = [permissions.AllowAny]
+
+    def get_permissions(self):
+        # Anyone can read a comment; only staff can edit or delete
+        return [permissions.AllowAny() if self.request.method == "GET" else permissions.IsAdminUser()]
 
     def get(self, request, pk):
         try:
@@ -602,9 +630,9 @@ class CommentLikeView(APIView):
 
     def post(self, request, pk):
         try:
+            if not Comment.objects.filter(pk=pk).update(likes=F("likes") + 1):
+                raise Comment.DoesNotExist
             comment = Comment.objects.get(pk=pk)
-            comment.likes += 1
-            comment.save()
             response_data = {
                 "message": "Comment liked successfully",
                 "data": {"likes": comment.likes},
@@ -626,9 +654,9 @@ class CommentDislikeView(APIView):
 
     def post(self, request, pk):
         try:
+            if not Comment.objects.filter(pk=pk).update(dislikes=F("dislikes") + 1):
+                raise Comment.DoesNotExist
             comment = Comment.objects.get(pk=pk)
-            comment.dislikes += 1
-            comment.save()
             response_data = {
                 "message": "Comment disliked successfully",
                 "data": {"dislikes": comment.dislikes},
@@ -644,9 +672,9 @@ class CommentDislikeView(APIView):
 
 
 class CommunityListCreateView(generics.ListCreateAPIView):
-    queryset = Community.objects.all()
+    queryset = Community.objects.select_related("author")
     # serializer_class = CommunitySerializer
-    permission_classes = [permissions.AllowAny] 
+    permission_classes = [IsStaffOrReadOnly]
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -663,28 +691,21 @@ class CommunityListCreateView(generics.ListCreateAPIView):
         )
 
     def create(self, request, *args, **kwargs):
-        # Parse the JSON data field from form-data
-        json_data = json.loads(request.data.get("data", "{}"))
-
-        # Merge the file (cover_image) into the parsed data
-        if request.FILES.get("cover_image"):
-            json_data["cover_image"] = request.FILES["cover_image"]
-
-        serializer = self.get_serializer(data=json_data)
+        serializer = self.get_serializer(data=_create_payload(request))
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
 
         return custom_response(
             success=True,
             message="Community created successfully",
-            data=serializer.data,
+            data=CommunitySerializer(serializer.instance, context=self.get_serializer_context()).data,
             status_code=status.HTTP_201_CREATED
         )
 
 class CommunityDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Community.objects.all()
+    queryset = Community.objects.select_related("author")
     # serializer_class = CommunitySerializer
-    permission_classes = [permissions.AllowAny] 
+    permission_classes = [IsStaffOrReadOnly]
 
     def get_serializer_class(self):
         if self.request.method in ['PUT', 'PATCH']:
@@ -696,10 +717,9 @@ class CommunityDetailView(generics.RetrieveUpdateDestroyAPIView):
         return get_object_or_404(Community, slug=self.kwargs["slug"])
 
     def retrieve(self, request, *args, **kwargs):
-        blog = self.get_object()
-        blog.views += 1
-        blog.save(update_fields=["views"])
-        
+        self.get_object()  # 404 if missing
+        self.get_queryset().filter(slug=kwargs["slug"]).update(views=F("views") + 1)
+
         response = super().retrieve(request, *args, **kwargs)
         return custom_response(
             success=True,
@@ -743,7 +763,7 @@ class CommunityDataView(APIView):
     def get(self, request):
         categories = Community.objects.values_list("category", flat=True).distinct()
 
-        community = Community.objects.all().order_by('-date')
+        community = Community.objects.select_related("author").order_by('-date')
         serialized_community = CommunitySerializer(community, many=True).data
 
         community_list = [
@@ -781,10 +801,13 @@ class CommunityDataView(APIView):
         return Response(CommunityData, status=200)
 
 
-class UserProfileView(APIView):
-    permission_classes = [permissions.AllowAny]  # or IsAuthenticated if needed
+class UserPublicProfileView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, email):
+        # Own profile, or any profile for staff
+        if not request.user.is_staff and request.user.email.lower() != email.lower():
+            return standard_response(status=False, message="Forbidden", status_code=status.HTTP_403_FORBIDDEN)
         try:
             user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
@@ -805,7 +828,7 @@ class UserProfileView(APIView):
 
 
 class DashboardStatsView(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAdminUser]
 
     def get(self, request):
         current_year = now().year

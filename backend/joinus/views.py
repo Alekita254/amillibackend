@@ -1,4 +1,6 @@
 from rest_framework import generics
+from rest_framework.exceptions import ValidationError
+from rest_framework.throttling import ScopedRateThrottle
 from .models import JoinUsPageConfig, JoinUsSubmission
 from .serializers import JoinUsPageConfigSerializer, JoinUsSubmissionSerializer
 from rest_framework import status, generics, permissions
@@ -20,35 +22,12 @@ class JoinUsConfigView(generics.RetrieveAPIView):
     def get_object(self):
         return self.get_queryset().first()
     
-class SendCustomEmailView(APIView):
-    
-    permission_classes = [permissions.AllowAny] 
-
-    def post(self, request):
-        subject = request.data.get('subject')
-        message = request.data.get('message')
-        recipient_list = request.data.get('recipients', [])
-
-        if not subject or not message or not recipient_list:
-            return custom_response(
-                success=False,
-                message="Missing required fields",
-                status_code=status.HTTP_400_BAD_REQUEST
-            )
-
-        send_mail(subject, message, 'your_email@example.com', recipient_list)
-
-        return custom_response(
-            success=True,
-            message="Email sent successfully"
-        )
-
-
-
 class JoinUsSubmissionView(generics.CreateAPIView):
     queryset = JoinUsSubmission.objects.all()
     serializer_class = JoinUsSubmissionSerializer
     permission_classes = [permissions.AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'email'
 
     def create(self, request, *args, **kwargs):
         try:
@@ -81,8 +60,8 @@ class JoinUsSubmissionView(generics.CreateAPIView):
            # email.send()
             try:
                 email.send()
-            except Exception as e:
-                print("Email sending failed: ", e)
+            except Exception:
+                logger.exception("JoinUs confirmation email failed")
 
 
             return custom_response(
@@ -92,8 +71,15 @@ class JoinUsSubmissionView(generics.CreateAPIView):
                 status_code=status.HTTP_201_CREATED
             )
 
+        except ValidationError as e:
+            return custom_response(
+                success=False,
+                message="Invalid submission.",
+                data=e.detail,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
         except Exception as e:
-            logger.error("Error handling JoinUs submission: %s", str(e))
+            logger.exception("Error handling JoinUs submission")
             return custom_response(
                 success=False,
                 message="There was an error processing your submission. Please try again later.",

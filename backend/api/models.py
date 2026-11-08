@@ -8,6 +8,7 @@ from django.utils.http import urlsafe_base64_encode
 from django.utils.encoding import force_bytes
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.text import slugify
+from .utils import unique_slug
 import datetime
 
 
@@ -29,16 +30,10 @@ class User(AbstractUser):
 
     email_verified = models.BooleanField(default=False)
     
-    def save(self, *args, **kwargs):
-        created = not self.pk
-        super().save(*args, **kwargs)
-        if created and not self.email_verified:
-            self.send_verification_email()
-    
     def send_verification_email(self):
         token = default_token_generator.make_token(self)
         uid = urlsafe_base64_encode(force_bytes(self.pk))
-        verification_url = f"{settings.BACKEND_URL}/api/users/verify-email/?uidb64={uid}&token={token}"
+        verification_url = f"{settings.BACKEND_URL}/api/verify-email/?uidb64={uid}&token={token}"
         
         subject = 'Verify Your Email Address'
         html_message = render_to_string('email_verification.html', {
@@ -58,7 +53,6 @@ class User(AbstractUser):
             html_message=html_message,
             fail_silently=False,
         )
-    pass
 
 
 class Author(models.Model):
@@ -101,7 +95,7 @@ class Blog(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.title)
+            self.slug = unique_slug(self, self.title)
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -138,7 +132,7 @@ class Community(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            self.slug = slugify(self.title)
+            self.slug = unique_slug(self, self.title)
         super().save(*args, **kwargs)
 
     def __str__(self):

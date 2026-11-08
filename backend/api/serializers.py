@@ -66,11 +66,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'email', 
             'first_name', 'last_name', 
-            'email_verified', 'date_joined'
+            'email_verified', 'date_joined', 'is_staff'
         ]
         read_only_fields = [
             'id', 'username', 'email', 
-            'email_verified', 'date_joined'
+            'email_verified', 'date_joined', 'is_staff'
         ]
 
 
@@ -125,26 +125,35 @@ class PasswordResetSerializer(serializers.Serializer):
     def validate_email(self, value):
         try:
             validate_email(value)
-            if not User.objects.filter(email__iexact=value).exists():
-                raise serializers.ValidationError("No account found with this email.")
-            return value.lower()
         except DjangoValidationError:
             raise serializers.ValidationError("Enter a valid email address.")
+        return value.lower()
 
     def save(self):
-        request = self.context.get('request')
+        from django.core.mail import send_mail
+        from django.template.loader import render_to_string
+        from django.utils.encoding import force_bytes
+        from django.utils.http import urlsafe_base64_encode
+        from django.utils import timezone
+
         email = self.validated_data['email']
-        
-        form = PasswordResetForm({'email': email})
-        if form.is_valid():
-            form.save(
-                request=request,
-                use_https=request.is_secure(),
-                email_template_name='users/password_reset_email.html',
-                subject_template_name='users/password_reset_subject.txt',
-                extra_email_context={
-                    'support_email': settings.DEFAULT_FROM_EMAIL
-                }
+        for user in User.objects.filter(email__iexact=email, is_active=True):
+            if not user.has_usable_password():
+                continue
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            html = render_to_string('users/password_reset_email.html', {
+                'full_name': f"{user.first_name} {user.last_name}".strip() or user.username,
+                'reset_link': f"{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}",
+                'expiry_hours': settings.PASSWORD_RESET_TIMEOUT // 3600,
+                'year': timezone.now().year,
+            })
+            send_mail(
+                render_to_string('users/password_reset_subject.txt').strip(),
+                f"Reset your password: {settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}",
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                html_message=html,
             )
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
@@ -234,6 +243,13 @@ class AuthorSerializer(serializers.ModelSerializer):
         model = Author
         fields = ['id', 'name', 'email', 'bio', 'profile_picture']
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        if not (request and request.user.is_staff):
+            data.pop('email', None)  # author emails are private
+        return data
+
 
 class BlogSerializer(serializers.ModelSerializer):
     author = AuthorSerializer(read_only=True)
@@ -289,6 +305,14 @@ class CommentSerializer(serializers.ModelSerializer):
         model = Comment
         fields = ['id', 'name', 'email', 'message', 'blog', 'parent', 'likes', 'dislikes', 'created_at', 'replies']
         read_only_fields = ['id', 'created_at', 'likes', 'dislikes']  # These fields shouldn't be modified directly
+        extra_kwargs = {'email': {'write_only': True}}
+
+    def validate(self, attrs):
+        blog = attrs.get('blog') or (self.instance and self.instance.blog)
+        parent = attrs.get('parent')
+        if parent and blog and parent.blog_id != blog.pk:
+            raise serializers.ValidationError({'parent': 'Parent comment belongs to a different post.'})
+        return attrs
 
     def get_replies(self, obj):
         """Fetch only direct replies to this comment."""
@@ -351,10 +375,6 @@ class UserPublicProfileSerializer(serializers.Serializer):
     def get_bio(self, obj):
         author = self.get_author(obj)
         return author.bio if author else ""
-
-    def get_website(self, obj):
-        author = self.get_author(obj)
-        return author.website if author else ""
 
     def get_profile_picture(self, obj):
         author = self.get_author(obj)
