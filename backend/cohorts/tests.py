@@ -72,3 +72,55 @@ class ModelTests(TestCase):
         mentor.delete()
         mentee.refresh_from_db()
         self.assertIsNone(mentee.mentor)
+
+
+from api.models import User
+from rest_framework.test import APIClient
+
+
+def staff_client():
+    user = User.objects.create_user("staff", "staff@x.com", "pass12345", is_staff=True)
+    client = APIClient()
+    client.force_authenticate(user)
+    return client
+
+
+class CohortApiTests(TestCase):
+    def setUp(self):
+        self.cohort = make_cohort(capacity=10)
+        self.url = f"/api/cohorts/{self.cohort.slug}/"
+        self.anon, self.staff = APIClient(), staff_client()
+
+    def test_public_detail_has_registration_fields_and_computed_counts(self):
+        add(self.cohort, "a@x.com")
+        add(self.cohort, "b@x.com")
+        add(self.cohort, "m@x.com", role=MENTOR)
+        add(self.cohort, "p@x.com", status=PENDING)
+        data = self.anon.get(self.url).json()["data"]
+        self.assertEqual(data["registration_state"], "open")
+        self.assertEqual((data["seats_taken"], data["seats_left"]), (2, 8))
+        self.assertEqual((data["learner_count"], data["mentor_count"]), (2, 1))
+        self.assertNotIn("pending_count", data)
+
+    def test_staff_detail_includes_pending_count(self):
+        add(self.cohort, "p@x.com", status=PENDING)
+        self.assertEqual(self.staff.get(self.url).json()["data"]["pending_count"], 1)
+
+    def test_staff_can_set_registration_open_and_capacity(self):
+        r = self.staff.patch(self.url, {"registration_open": False, "capacity": 25}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.cohort.refresh_from_db()
+        self.assertEqual((self.cohort.registration_open, self.cohort.capacity), (False, 25))
+
+    def test_capacity_cannot_drop_below_approved_mentees_but_can_be_cleared(self):
+        add(self.cohort, "a@x.com")
+        add(self.cohort, "b@x.com")
+        low = self.staff.patch(self.url, {"capacity": 1}, format="json")
+        self.assertEqual(low.status_code, 400)
+        self.assertIn("2 mentees", low.json()["message"])
+        self.assertEqual(self.staff.patch(self.url, {"capacity": None}, format="json").status_code, 200)
+
+    def test_typed_counts_are_ignored(self):
+        self.staff.patch(self.url, {"learner_count": 99, "mentor_count": 99}, format="json")
+        data = self.anon.get(self.url).json()["data"]
+        self.assertEqual((data["learner_count"], data["mentor_count"]), (0, 0))

@@ -3,7 +3,8 @@ from rest_framework import generics, permissions, status
 from cohorts.models import Cohort
 from cohorts.serializers import CohortSerializer
 from api.permissions import IsStaffOrReadOnly
-from api.utils import custom_response
+from api.utils import custom_response, error_response
+from rest_framework.exceptions import ValidationError
 
 
 class PublishedForPublicMixin:
@@ -56,7 +57,10 @@ class CohortDetailView(PublishedForPublicMixin, generics.RetrieveUpdateDestroyAP
         )
 
     def update(self, request, *args, **kwargs):
-        response = super().update(request, *args, **kwargs)
+        try:
+            response = super().update(request, *args, **kwargs)
+        except ValidationError as exc:
+            return error_response(exc)
         return custom_response(
             success=True,
             message="Cohort updated successfully",
