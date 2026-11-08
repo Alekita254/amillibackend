@@ -428,3 +428,22 @@ class MemberApiTests(TestCase):
         self.cohort.save()
         add(self.cohort, "a@x.com")
         self.assertEqual(len(self.staff.get(self.base).json()["data"]), 1)
+
+
+from django.conf import settings
+
+
+class FinalReviewFixTests(TestCase):
+    def test_saving_other_fields_is_not_blocked_when_capacity_is_unchanged_but_over_full(self):
+        # Seat check can be bypassed (Django admin, races), leaving more approved mentees than seats.
+        cohort = make_cohort("Alpha", capacity=2)
+        for i in range(3):
+            add(cohort, f"m{i}@x.com")
+        staff = staff_client()
+        url = "/api/cohorts/alpha/"
+        r = staff.patch(url, {"title": "Alpha renamed", "capacity": 2}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)  # same capacity is not a change
+        self.assertEqual(staff.patch(url, {"capacity": 1}, format="json").status_code, 400)  # lowering still checked
+
+    def test_email_sending_has_a_timeout_so_a_hung_smtp_server_cannot_hang_requests(self):
+        self.assertEqual(settings.EMAIL_TIMEOUT, 10)

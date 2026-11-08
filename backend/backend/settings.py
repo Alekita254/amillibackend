@@ -236,6 +236,7 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.zoho.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
+EMAIL_TIMEOUT = 10  # seconds; a hung SMTP server must not hang the request
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', 'info@amilliontechies.com')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 

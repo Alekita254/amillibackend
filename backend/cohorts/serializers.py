@@ -15,7 +15,9 @@ class CohortSerializer(serializers.ModelSerializer):
         return obj.memberships.filter(status=CohortMembership.STATUS_PENDING).count()
 
     def validate_capacity(self, value):
-        if self.instance and value is not None and value < self.instance.seats_taken:
+        # Only a real change is checked: an unchanged value must not block saving other fields.
+        if (self.instance and value is not None and value != self.instance.capacity
+                and value < self.instance.seats_taken):
             raise serializers.ValidationError(
                 f"Capacity can't be lower than the {self.instance.seats_taken} mentees already approved."
             )
