@@ -55,3 +55,28 @@ class CohortSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "slug", "created_at", "updated_at"]
+
+
+class RegistrationSerializer(serializers.ModelSerializer):
+    """Public application. The cohort comes in through the serializer context."""
+
+    class Meta:
+        model = CohortMembership
+        fields = [
+            "role", "full_name", "email", "phone", "location",
+            "headline", "about", "expertise", "linkedin", "show_publicly",
+        ]
+
+    def validate(self, attrs):
+        cohort = self.context["cohort"]
+        state = cohort.registration_state
+        if state == "closed":
+            raise serializers.ValidationError("Registration for this cohort is closed.")
+        if state == "full" and attrs["role"] == CohortMembership.ROLE_MENTEE:
+            raise serializers.ValidationError("This cohort is full.")
+        if CohortMembership.objects.filter(cohort=cohort, email__iexact=attrs["email"].strip()).exists():
+            raise serializers.ValidationError(DUPLICATE_MESSAGE)
+        return attrs
+
+
+DUPLICATE_MESSAGE = "You've already registered for this cohort with this email."

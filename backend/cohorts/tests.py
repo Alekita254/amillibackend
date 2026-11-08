@@ -124,3 +124,93 @@ class CohortApiTests(TestCase):
         self.staff.patch(self.url, {"learner_count": 99, "mentor_count": 99}, format="json")
         data = self.anon.get(self.url).json()["data"]
         self.assertEqual((data["learner_count"], data["mentor_count"]), (0, 0))
+
+
+from unittest import mock
+from django.core import mail
+from django.core.cache import cache
+from django.test import override_settings
+from cohorts.views import CohortRegisterView
+
+CLOSED_MSG = "Registration for this cohort is closed."
+FULL_MSG = "This cohort is full."
+DUPLICATE_MSG = "You've already registered for this cohort with this email."
+
+
+def reg_payload(**overrides):
+    data = dict(role="MENTEE", full_name="Ann Wanjiku", email="ann@x.com",
+                about="I want to learn backend development.")
+    data.update(overrides)
+    return data
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class RegisterTests(TestCase):
+    def setUp(self):
+        cache.clear()  # the 'email' throttle scope is shared with other tests
+        self.cohort = make_cohort("Alpha")
+        self.url = "/api/cohorts/alpha/register/"
+        self.client = APIClient()
+
+    def post(self, **overrides):
+        return self.client.post(self.url, reg_payload(**overrides), format="json")
+
+    def test_registers_pending_and_emails_applicant_once(self):
+        r = self.post(show_publicly=True)
+        self.assertEqual(r.status_code, 201, r.content)
+        m = CohortMembership.objects.get()
+        self.assertEqual((m.status, m.role, m.show_publicly), (PENDING, MENTEE, True))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["ann@x.com"])
+        self.assertIn("Alpha", mail.outbox[0].subject)
+
+    def test_closed_cohort_is_rejected_with_clear_message(self):
+        self.cohort.registration_open = False
+        self.cohort.save()
+        r = self.post()
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["message"], CLOSED_MSG)
+
+    def test_unpublished_cohort_is_404(self):
+        self.cohort.published = False
+        self.cohort.save()
+        self.assertEqual(self.post().status_code, 404)
+
+    def test_full_cohort_blocks_mentees_but_not_mentors(self):
+        self.cohort.capacity = 1
+        self.cohort.save()
+        add(self.cohort, "taken@x.com")
+        full = self.post()
+        self.assertEqual((full.status_code, full.json()["message"]), (400, FULL_MSG))
+        self.assertEqual(self.post(role="MENTOR").status_code, 201)
+
+    def test_duplicate_email_ignores_case_and_spaces(self):
+        self.assertEqual(self.post(email="ann@x.com").status_code, 201)
+        dup = self.post(email="  ANN@x.com ")
+        self.assertEqual((dup.status_code, dup.json()["message"]), (400, DUPLICATE_MSG))
+        self.assertEqual(CohortMembership.objects.count(), 1)
+
+    def test_honeypot_returns_success_without_saving(self):
+        r = self.post(website="http://spam.example")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(CohortMembership.objects.count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_invalid_input_is_rejected(self):
+        missing = self.client.post(self.url, {k: v for k, v in reg_payload().items() if k != "about"}, format="json")
+        self.assertEqual(missing.status_code, 400)
+        self.assertIn("about", missing.json()["data"])
+        self.assertEqual(self.post(about="x" * 2001).status_code, 400)
+        self.assertEqual(self.post(linkedin="not a url").status_code, 400)
+        self.assertEqual(self.post(role="ADMIN").status_code, 400)
+        self.assertEqual(CohortMembership.objects.count(), 0)
+
+    def test_registration_uses_the_email_throttle_scope(self):
+        self.assertEqual(CohortRegisterView.throttle_scope, "email")
+
+    def test_mail_failure_does_not_fail_registration(self):
+        with mock.patch("cohorts.emails.send_mail", side_effect=OSError("smtp down")), \
+                self.assertLogs("cohorts.emails", "ERROR"):
+            r = self.post()
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(CohortMembership.objects.count(), 1)
