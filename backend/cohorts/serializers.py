@@ -80,3 +80,11 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
 
 DUPLICATE_MESSAGE = "You've already registered for this cohort with this email."
+
+
+class PublicPersonSerializer(serializers.ModelSerializer):
+    """What the public may see of a member. Never add contact details here."""
+
+    class Meta:
+        model = CohortMembership
+        fields = ["id", "role", "full_name", "headline", "about"]

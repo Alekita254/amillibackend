@@ -1,7 +1,7 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, status
-from cohorts.models import Cohort
-from cohorts.serializers import CohortSerializer, DUPLICATE_MESSAGE, RegistrationSerializer
+from cohorts.models import Cohort, CohortMembership
+from cohorts.serializers import CohortSerializer, DUPLICATE_MESSAGE, RegistrationSerializer, PublicPersonSerializer
 from cohorts.emails import send_application_received
 from django.db import IntegrityError
 from rest_framework.throttling import ScopedRateThrottle
@@ -112,3 +112,21 @@ class CohortRegisterView(APIView):
 
         send_application_received(member)
         return received
+
+
+class CohortPeopleView(generics.ListAPIView):
+    """Public: approved members who chose to be shown (mentors first)."""
+
+    serializer_class = PublicPersonSerializer
+    permission_classes = [permissions.AllowAny]
+    pagination_class = None
+
+    def get_queryset(self):
+        cohort = get_object_or_404(Cohort, slug=self.kwargs["slug"], published=True)
+        return cohort.memberships.filter(
+            status=CohortMembership.STATUS_APPROVED, show_publicly=True
+        ).order_by("-role", "full_name")  # "MENTOR" sorts after "MENTEE", so descending puts mentors first
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        return custom_response(success=True, message="People retrieved successfully", data=response.data)

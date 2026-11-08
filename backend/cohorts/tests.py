@@ -214,3 +214,47 @@ class RegisterTests(TestCase):
             r = self.post()
         self.assertEqual(r.status_code, 201)
         self.assertEqual(CohortMembership.objects.count(), 1)
+
+
+REJECTED = CohortMembership.STATUS_REJECTED
+
+
+class PeopleTests(TestCase):
+    def setUp(self):
+        self.cohort = make_cohort("Alpha")
+        self.url = "/api/cohorts/alpha/people/"
+        self.client = APIClient()
+
+    def people(self):
+        r = self.client.get(self.url)
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json()["data"]
+
+    def test_only_approved_and_opted_in_people_are_listed(self):
+        add(self.cohort, "shown@x.com", show_publicly=True, full_name="Shown")
+        add(self.cohort, "hidden@x.com", show_publicly=False)
+        add(self.cohort, "pending@x.com", status=PENDING, show_publicly=True)
+        add(self.cohort, "rejected@x.com", status=REJECTED, show_publicly=True)
+        self.assertEqual([p["full_name"] for p in self.people()], ["Shown"])
+
+    def test_public_fields_never_include_private_details(self):
+        add(self.cohort, "a@x.com", show_publicly=True, phone="0700", linkedin="https://l.in/a",
+            headline="Dev", admin_note="secret", location="Nairobi", expertise="private goals")
+        person = self.people()[0]
+        self.assertEqual(set(person), {"id", "role", "full_name", "headline", "about"})
+
+    def test_mentors_come_first_then_by_name(self):
+        add(self.cohort, "z@x.com", full_name="Zed", show_publicly=True)
+        add(self.cohort, "a@x.com", full_name="Amy", show_publicly=True)
+        add(self.cohort, "m@x.com", role=MENTOR, full_name="Mo", show_publicly=True)
+        self.assertEqual([p["full_name"] for p in self.people()], ["Mo", "Amy", "Zed"])
+
+    def test_nobody_opted_in_returns_empty_list(self):
+        add(self.cohort, "a@x.com", show_publicly=False)
+        self.assertEqual(self.people(), [])
+
+    def test_unpublished_cohort_is_404(self):
+        self.assertEqual(self.client.get(self.url).status_code, 200)  # route exists
+        self.cohort.published = False
+        self.cohort.save()
+        self.assertEqual(self.client.get(self.url).status_code, 404)
