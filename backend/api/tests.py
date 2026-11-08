@@ -95,3 +95,14 @@ class ContentAccessTests(TestCase):
         self.assertEqual(len(_mail.outbox), 1)
         stale = APIClient(HTTP_AUTHORIZATION='Bearer not-a-real-token')
         self.assertEqual(stale.get('/api/blogs/').status_code, 200)
+
+
+class TokenRefreshTests(TestCase):
+    def test_refresh_returns_new_access_token(self):
+        User.objects.create_user('ann', 'ann@x.com', 'pass12345', email_verified=True)
+        c = APIClient()
+        tokens = c.post('/api/token/', {'email': 'ann@x.com', 'password': 'pass12345'}, format='json').json()['data']['tokens']
+        r = c.post('/api/token/refresh/', {'refresh': tokens['refresh']}, format='json')
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIn('access', r.json())
+        self.assertEqual(c.post('/api/token/refresh/', {'refresh': 'garbage'}, format='json').status_code, 401)

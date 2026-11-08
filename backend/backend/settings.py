@@ -179,6 +179,14 @@ REST_FRAMEWORK = {
 
 
 
+from datetime import timedelta
+
+# Short-lived access token; the frontend swaps it using the refresh token.
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+}
+
 JAZZMIN_SETTINGS = {
     "site_title": "Backend Admin",
     "site_header": "Backend Dashboard",
