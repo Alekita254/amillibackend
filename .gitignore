@@ -15,14 +15,15 @@ pip-delete-this-directory.txt
 
 # Django-specific
 /media/
+backend/media/
+backend/db.sqlite3
 staticfiles/
 *.log
 logs/
 
-# Ignore Django migrations compiled files
+# Ignore Django migrations compiled files (the .py migrations must be committed)
 */migrations/*.pyc
 */migrations/__pycache__/
-*/migrations/*.py
 
 # Ignore environment variables and secrets
 .env

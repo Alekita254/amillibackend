@@ -43,24 +43,25 @@ def env_list(name, default=None, merge_default=False):
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-yj&iq=svp^7kl9=e%!$)29^r&)6o9az8v8(c9-id%b)fmw672a'
+DEBUG = env_bool("DJANGO_DEBUG", False)
 
-# SECURITY WARNING: don't run with debug turned on in production!
-#DEBUG = True
-DEBUG = False
+# No default in production: a missing key must fail loudly, not fall back to a public one.
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or (
+    "dev-only-insecure-key" if DEBUG else None
+)
+if not SECRET_KEY:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured("Set DJANGO_SECRET_KEY in backend/.env")
 
 
-ALLOWED_HOSTS = [
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", [
     "137.184.149.59",
     "localhost",
     "127.0.0.1",
     "milliapi.getotech.co.ke",
     "54.164.100.151",
     "millibackend.amilliontechies.com",
-]
-
-#ALLOWED_HOSTS = ["*"]
+], merge_default=True)
 
 # Application definition
 
@@ -160,8 +161,6 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
-
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
@@ -169,10 +168,13 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'api.authentication.OptionalJWTAuthentication',
+    ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
     ],
+    'DEFAULT_THROTTLE_RATES': {'email': '20/hour'},  # endpoints that send email
 }
 
 
@@ -185,9 +187,6 @@ JAZZMIN_SETTINGS = {
     "navigation_expanded": True,
 }
 
-CORS_ALLOW_ALL_ORIGINS = True  # Allows all domains to access your API
-
-# OR for specific domains (recommended for production)
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -222,15 +221,15 @@ AUTHENTICATION_BACKENDS = (
 AUTH_USER_MODEL = 'api.User' 
 
 
-DEFAULT_FROM_EMAIL = 'info@amiliontechies.com'
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'info@amilliontechies.com')
 
 # Email settings (development)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.zoho.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'info@amilliontechies.com'
-EMAIL_HOST_PASSWORD = 'eDihLLkla6KW'
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', 'info@amilliontechies.com')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 
 
 # Static files (CSS, JavaScript, Images)
@@ -242,7 +241,6 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-MEDIAFILES_DIRS = [MEDIA_ROOT]
 
 SITE_DOMAIN = "https://millibackend.amilliontechies.com"
 # SITE_DOMAIN = "http://127.0.0.1:5000"
