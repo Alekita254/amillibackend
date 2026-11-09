@@ -199,6 +199,9 @@ JAZZMIN_SETTINGS = {
     "welcome_sign": "Welcome to the Admin Panel",
     "show_sidebar": True,
     "navigation_expanded": True,
+    "custom_links": {
+        "api": [{"name": "Send test email", "url": "admin:send_test_email", "icon": "fas fa-envelope"}],
+    },
 }
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", [

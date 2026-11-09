@@ -1,0 +1,16 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div id="content-main">
+  {% if sent_to %}<p class="alert alert-success">Sent to <strong>{{ sent_to }}</strong>. Check that inbox, and the spam folder too.</p>{% endif %}
+  {% if error %}<p class="alert alert-danger"><strong>Couldn't send:</strong> {{ error }}</p>{% endif %}
+  <p>Sends a short test message through the site's email settings ({{ host }}, from {{ from_email }}).</p>
+  <form method="post">{% csrf_token %}
+    {% if can_choose %}
+      <p><label>Send to <input type="email" name="to" value="{{ default_to }}" size="40"></label></p>
+    {% else %}
+      <p>It will be sent to your own address: <strong>{{ default_to|default:"(none set)" }}</strong>.</p>
+    {% endif %}
+    <button type="submit" class="btn btn-primary">Send test email</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,5 +1,11 @@
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
+from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
+from django.core.validators import validate_email
+from django.template.response import TemplateResponse
+from django.urls import path
 from .models import *
 
 class CustomUserAdmin(UserAdmin):
@@ -29,6 +35,43 @@ class CustomUserAdmin(UserAdmin):
     search_fields = ('username', 'email', 'first_name', 'last_name')
     ordering = ('username',)
     filter_horizontal = ('groups', 'user_permissions',)
+
+    def get_urls(self):
+        return [
+            path('send-test-email/', self.admin_site.admin_view(self.send_test_email), name='send_test_email'),
+        ] + super().get_urls()
+
+    def send_test_email(self, request):
+        """Send a short test message through the real email settings, to check that delivery works."""
+        sent_to = error = None
+        if request.method == 'POST':
+            user = request.user
+            # Only superusers may pick another address; everyone else can only mail themselves.
+            to = (request.POST.get('to', '').strip() if user.is_superuser else '') or user.email
+            try:
+                if not to:
+                    raise ValueError('Your account has no email address. Add one to your user first.')
+                validate_email(to)
+                send_mail(
+                    'Test email from A Million Techies',
+                    f'If you can read this, sending email works.\n\nSent by {user.username} from the admin panel.',
+                    settings.DEFAULT_FROM_EMAIL, [to], fail_silently=False,
+                )
+                sent_to = to
+            except ValidationError:
+                error = 'Enter a valid email address.'
+            except Exception as e:  # show the SMTP problem instead of a 500; only staff can reach this page
+                error = f'{type(e).__name__}: {e}'
+        return TemplateResponse(request, 'admin/send_test_email.html', {
+            **self.admin_site.each_context(request),
+            'title': 'Send test email',
+            'default_to': request.user.email,
+            'can_choose': request.user.is_superuser,
+            'sent_to': sent_to,
+            'error': error,
+            'from_email': settings.DEFAULT_FROM_EMAIL,
+            'host': settings.EMAIL_HOST,
+        })
 
 # Register your custom User model with the custom admin class
 admin.site.register(User, CustomUserAdmin)

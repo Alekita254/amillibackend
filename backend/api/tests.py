@@ -1,3 +1,4 @@
+from unittest import mock
 from django.test import TestCase, override_settings
 from django.core import mail
 from api.models import User
@@ -143,3 +144,56 @@ class ImageUploadTests(TestCase):
         self.assertTrue(ok.json()['data']['cover_image'].endswith('.png'))
         bad = c.post('/api/blogs/', {'data': data, 'cover_image': SimpleUploadedFile('x.png', b'not an image')}, format='multipart')
         self.assertEqual(bad.status_code, 400)
+
+
+from django.test import Client
+from django.urls import reverse
+
+
+@override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend', ALLOWED_HOSTS=['testserver'])
+class AdminTestEmailTests(TestCase):
+    def setUp(self):
+        self.url = reverse('admin:send_test_email')
+        self.staff = User.objects.create_user('st', 'staff@x.com', 'pass12345', is_staff=True)
+        self.boss = User.objects.create_superuser('su', 'boss@x.com', 'pass12345')
+
+    def login(self, user):
+        c = Client()
+        c.force_login(user)
+        return c
+
+    def test_only_staff_can_open_it(self):
+        self.assertEqual(Client().get(self.url).status_code, 302)  # to the admin login
+        plain = User.objects.create_user('p', 'p@x.com', 'pass12345')
+        self.assertEqual(self.login(plain).get(self.url).status_code, 302)
+        r = self.login(self.staff).get(self.url)
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Send test email')
+
+    def test_staff_always_send_to_their_own_address(self):
+        r = self.login(self.staff).post(self.url, {'to': 'victim@example.com'})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['staff@x.com'])  # the field is ignored for non-superusers
+        self.assertContains(r, 'staff@x.com')
+
+    def test_superuser_can_pick_the_recipient(self):
+        self.login(self.boss).post(self.url, {'to': 'other@example.com'})
+        self.assertEqual(mail.outbox[0].to, ['other@example.com'])
+        self.login(self.boss).post(self.url, {})  # blank means themselves
+        self.assertEqual(mail.outbox[1].to, ['boss@x.com'])
+
+    def test_bad_recipient_or_no_address_sends_nothing(self):
+        self.assertContains(self.login(self.boss).post(self.url, {'to': 'not-an-email'}), 'valid email')
+        no_email = User.objects.create_user('ne', '', 'pass12345', is_staff=True)
+        self.assertContains(self.login(no_email).post(self.url, {}), 'no email address')
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_a_mail_server_failure_is_shown_not_a_500(self):
+        with mock.patch('api.admin.send_mail', side_effect=OSError('smtp down')):
+            r = self.login(self.staff).post(self.url, {})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'smtp down')
+
+    def test_the_admin_sidebar_links_to_it(self):
+        self.assertContains(self.login(self.boss).get(reverse('admin:index')), 'send-test-email')
