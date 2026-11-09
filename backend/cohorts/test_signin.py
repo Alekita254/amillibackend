@@ -106,3 +106,87 @@ class SigninHelperTests(TestCase):
         refresh = RefreshToken(tokens["refresh"])
         self.assertAlmostEqual(refresh["exp"] - refresh["iat"], 30 * 24 * 3600, delta=5)
         self.assertTrue(tokens["access"])
+
+
+from unittest import mock
+
+from django.core import mail
+from django.core.cache import cache
+from django.test import override_settings
+from rest_framework.test import APIClient
+
+from cohorts.member_views import SigninRequestView
+
+GENERIC = "If you've applied to a cohort, we've emailed you a sign-in link."
+REQUEST_URL = "/api/members/signin/request/"
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class SigninRequestTests(TestCase):
+    def setUp(self):
+        cache.clear()  # the 'email' throttle scope is shared with other tests
+        self.cohort = make_cohort("Alpha")
+        self.client = APIClient()
+
+    def ask(self, email):
+        return self.client.post(REQUEST_URL, {"email": email}, format="json")
+
+    def test_known_email_gets_one_link_by_email(self):
+        add(self.cohort, "ann@x.com")
+        r = self.ask("ann@x.com")
+        self.assertEqual((r.status_code, r.json()["message"]), (200, GENERIC))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["ann@x.com"])
+        body = mail.outbox[0].body
+        self.assertIn("/signin/verify?token=", body)
+        self.assertIn("15 minutes", body)
+        self.assertIn("works once", body)
+        self.assertEqual(LoginLink.objects.count(), 1)
+
+    def test_unknown_staff_superuser_and_inactive_emails_get_the_same_answer_and_no_mail(self):
+        add(self.cohort, "known@x.com")
+        known = self.ask("known@x.com")
+        cache.clear()
+        for email, make in (
+            ("nobody@x.com", None),
+            ("staff@x.com", lambda: User.objects.create_user("s", "staff@x.com", "pw12345678", is_staff=True)),
+            ("root@x.com", lambda: User.objects.create_superuser("r", "root@x.com", "pw12345678")),
+            ("off@x.com", lambda: User.objects.create_user("o", "off@x.com", "pw12345678", is_active=False)),
+        ):
+            add(self.cohort, email) if make else None
+            make and make()
+            mail.outbox.clear()
+            before = LoginLink.objects.count()
+            r = self.ask(email)
+            self.assertEqual(r.content, known.content, email)  # identical body: nothing to learn from it
+            self.assertEqual(len(mail.outbox), 0, email)
+            self.assertEqual(LoginLink.objects.count(), before, email)
+
+    def test_second_request_within_a_minute_sends_nothing(self):
+        add(self.cohort, "ann@x.com")
+        self.ask("ann@x.com")
+        r = self.ask("ann@x.com")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual((len(mail.outbox), LoginLink.objects.count()), (1, 1))
+
+    def test_case_and_spaces_are_ignored(self):
+        add(self.cohort, "ann@x.com")
+        self.assertEqual(self.ask("  ANN@x.com ").status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["ann@x.com"])
+
+    def test_missing_or_malformed_email_is_rejected(self):
+        self.assertEqual(self.client.post(REQUEST_URL, {}, format="json").status_code, 400)
+        self.assertEqual(self.ask("not-an-email").status_code, 400)
+        self.assertEqual(self.client.post(REQUEST_URL, ["a@x.com"], format="json").status_code, 400)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_mail_failure_still_looks_like_success(self):
+        add(self.cohort, "ann@x.com")
+        with mock.patch("cohorts.emails.send_mail", side_effect=OSError("smtp down")), \
+                self.assertLogs("cohorts.emails", "ERROR"):
+            r = self.ask("ann@x.com")
+        self.assertEqual((r.status_code, r.json()["message"]), (200, GENERIC))
+
+    def test_uses_the_email_throttle_scope(self):
+        self.assertEqual(SigninRequestView.throttle_scope, "email")

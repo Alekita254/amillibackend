@@ -46,3 +46,16 @@ def send_decision(m):
             "— The A Million Techies team",
             m.email,
         )
+
+
+def send_signin_link(email, raw_token):
+    link = f"{settings.FRONTEND_URL}/signin/verify?token={raw_token}"
+    _send(
+        "Your sign-in link for A Million Techies",
+        "Hi,\n\n"
+        f"Use this link to sign in:\n{link}\n\n"
+        "It works once and expires in 15 minutes.\n\n"
+        "If you didn't ask for this, you can ignore this email.\n\n"
+        "— The A Million Techies team",
+        email,
+    )
