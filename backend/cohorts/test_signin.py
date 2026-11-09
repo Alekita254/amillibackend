@@ -260,3 +260,147 @@ class SigninVerifyTests(TestCase):
     def test_uses_its_own_throttle_scope(self):
         self.assertEqual(SigninVerifyView.throttle_scope, "signin_verify")
 
+
+
+import json
+
+ME_URL = "/api/members/me/"
+
+
+class MeTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.clients = {}
+        self.cohort = make_cohort("Alpha")
+        self.other = make_cohort("Beta")
+
+    def as_member(self, email):
+        """An API client signed in through the real link flow (one sign-in per email per test)."""
+        if email not in self.clients:
+            raw = signin.issue_link(email)
+            client = APIClient()
+            r = client.post(VERIFY_URL, {"token": raw}, format="json")
+            client.credentials(HTTP_AUTHORIZATION="Bearer " + r.json()["data"]["tokens"]["access"])
+            self.clients[email] = client
+        return self.clients[email]
+
+    def me(self, email):
+        r = self.as_member(email).get(ME_URL)
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json()["data"]
+
+    def card(self, email, cohort_slug="alpha"):
+        return next(m for m in self.me(email)["memberships"] if m["cohort"]["slug"] == cohort_slug)
+
+    def test_requires_sign_in(self):
+        self.assertEqual(APIClient().get(ME_URL).status_code, 401)
+        self.assertEqual(APIClient().patch(ME_URL + "1/", {}, format="json").status_code, 401)
+
+    def test_a_user_without_applications_gets_an_empty_list(self):
+        client = APIClient()
+        client.force_authenticate(User.objects.create_user("p", "plain@x.com", "pw12345678"))
+        r = client.get(ME_URL)
+        self.assertEqual((r.status_code, r.json()["data"]["memberships"]), (200, []))
+
+    def test_an_approved_mentee_sees_an_approved_assigned_mentor_with_email(self):
+        mentor = add(self.cohort, "mo@x.com", role=MENTOR, full_name="Mo Mentor", headline="Senior dev", phone="0722-MENTOR")
+        add(self.cohort, "ann@x.com", mentor=mentor)
+        card = self.card("ann@x.com")
+        self.assertEqual(card["mentor"], {"full_name": "Mo Mentor", "headline": "Senior dev", "about": "about", "email": "mo@x.com"})
+        self.assertEqual((card["role"], card["status"], card["mentees"]), ("MENTEE", "APPROVED", []))
+        self.assertNotIn("0722-MENTOR", json.dumps(self.me("ann@x.com")))
+
+    def test_no_mentor_is_shown_unless_pair_is_approved_and_assigned(self):
+        approved = add(self.cohort, "m1@x.com", role=MENTOR)
+        pending = add(self.cohort, "m2@x.com", role=MENTOR, status=PENDING)
+        rejected = add(self.cohort, "m3@x.com", role=MENTOR, status=REJECTED)
+        add(self.cohort, "unassigned@x.com")
+        add(self.cohort, "p1@x.com", mentor=pending)
+        add(self.cohort, "p2@x.com", mentor=rejected)
+        add(self.cohort, "pend@x.com", status=PENDING, mentor=approved)  # not approved themselves
+        for email in ("unassigned@x.com", "p1@x.com", "p2@x.com", "pend@x.com"):
+            self.assertIsNone(self.card(email)["mentor"], email)
+
+    def test_a_mentor_sees_only_their_approved_assigned_mentees(self):
+        mentor = add(self.cohort, "mo@x.com", role=MENTOR)
+        other_mentor = add(self.cohort, "om@x.com", role=MENTOR)
+        add(self.cohort, "a@x.com", full_name="Amy", mentor=mentor, phone="0711-MENTEE", linkedin="https://linkedin.com/in/amy")
+        add(self.cohort, "b@x.com", full_name="Bob", mentor=mentor, status=REJECTED)
+        add(self.cohort, "c@x.com", full_name="Cy", mentor=mentor, status=PENDING)
+        add(self.cohort, "d@x.com", full_name="Di")  # unassigned
+        add(self.cohort, "e@x.com", full_name="Ed", mentor=other_mentor)
+        add(self.other, "f@x.com", full_name="Flo")  # other cohort
+        payload = self.me("mo@x.com")
+        self.assertEqual([x["full_name"] for x in payload["memberships"][0]["mentees"]], ["Amy"])
+        self.assertEqual(payload["memberships"][0]["mentees"][0]["email"], "a@x.com")
+        text = json.dumps(payload)
+        for secret in ("0711-MENTEE", "linkedin.com/in/amy", "Bob", "Cy", "Di", "Ed", "Flo"):
+            self.assertNotIn(secret, text, secret)
+
+    def test_a_mentee_who_is_rejected_or_unassigned_leaves_the_mentors_list(self):
+        mentor = add(self.cohort, "mo@x.com", role=MENTOR)
+        mentee = add(self.cohort, "a@x.com", mentor=mentor)
+        self.assertEqual(len(self.card("mo@x.com")["mentees"]), 1)
+        mentee.status = REJECTED
+        mentee.save()
+        self.assertEqual(self.card("mo@x.com")["mentees"], [])
+        mentee.status, mentee.mentor = APPROVED, None
+        mentee.save()
+        self.assertEqual(self.card("mo@x.com")["mentees"], [])
+
+    def test_one_person_can_be_a_mentee_in_one_cohort_and_a_mentor_in_another(self):
+        boss = add(self.cohort, "boss@x.com", role=MENTOR, full_name="Boss")
+        add(self.cohort, "me@x.com", mentor=boss)
+        mine_as_mentor = add(self.other, "me@x.com", role=MENTOR)
+        add(self.other, "kid@x.com", mentor=mine_as_mentor, full_name="Kid")
+        payload = self.me("me@x.com")
+        self.assertEqual(len(payload["memberships"]), 2)
+        alpha = next(m for m in payload["memberships"] if m["cohort"]["slug"] == "alpha")
+        beta = next(m for m in payload["memberships"] if m["cohort"]["slug"] == "beta")
+        self.assertEqual((alpha["role"], alpha["mentor"]["full_name"], alpha["mentees"]), ("MENTEE", "Boss", []))
+        self.assertEqual((beta["role"], beta["mentor"], [x["full_name"] for x in beta["mentees"]]), ("MENTOR", None, ["Kid"]))
+
+    def test_pending_and_rejected_applicants_see_their_status_only(self):
+        add(self.cohort, "pend@x.com", status=PENDING)
+        add(self.cohort, "rej@x.com", status=REJECTED)
+        for email, status in (("pend@x.com", "PENDING"), ("rej@x.com", "REJECTED")):
+            card = self.card(email)
+            self.assertEqual((card["status"], card["mentor"], card["mentees"]), (status, None, []))
+
+    def test_payload_has_cohort_info_and_never_the_admin_note(self):
+        add(self.cohort, "ann@x.com", admin_note="admin-note-secret")
+        data = self.me("ann@x.com")
+        card = data["memberships"][0]
+        self.assertEqual(set(card["cohort"]), {"title", "slug", "status", "start_date", "end_date", "duration"})
+        self.assertEqual(set(card["profile"]), {"full_name", "phone", "location", "headline", "about", "expertise", "linkedin", "show_publicly"})
+        self.assertNotIn("admin-note-secret", json.dumps(data))
+
+    def test_member_can_edit_only_their_profile_fields(self):
+        mentor = add(self.cohort, "mo@x.com", role=MENTOR)
+        m = add(self.cohort, "ann@x.com", status=PENDING)
+        client = self.as_member("ann@x.com")
+        r = client.patch(f"{ME_URL}{m.pk}/", {
+            "headline": "Dev", "about": "New bio", "show_publicly": True,
+            "status": "APPROVED", "role": "MENTOR", "mentor": mentor.pk, "admin_note": "x", "email": "other@x.com",
+        }, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        m.refresh_from_db()
+        self.assertEqual((m.headline, m.about, m.show_publicly), ("Dev", "New bio", True))
+        self.assertEqual((m.status, m.role, m.mentor, m.admin_note, m.email), (PENDING, MENTEE, None, "", "ann@x.com"))
+        self.assertEqual(r.json()["data"]["profile"]["headline"], "Dev")
+
+    def test_member_cannot_touch_someone_elses_membership(self):
+        mine = add(self.cohort, "ann@x.com")
+        theirs = add(self.cohort, "bob@x.com")
+        client = self.as_member("ann@x.com")
+        self.assertEqual(client.patch(f"{ME_URL}{mine.pk}/", {"headline": "ok"}, format="json").status_code, 200)
+        r = client.patch(f"{ME_URL}{theirs.pk}/", {"headline": "hacked"}, format="json")
+        self.assertEqual(r.status_code, 404)
+        theirs.refresh_from_db()
+        self.assertEqual(theirs.headline, "")
+
+    def test_blank_about_is_rejected_with_a_message(self):
+        m = add(self.cohort, "ann@x.com")
+        r = self.as_member("ann@x.com").patch(f"{ME_URL}{m.pk}/", {"about": ""}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertTrue(r.json()["message"])
