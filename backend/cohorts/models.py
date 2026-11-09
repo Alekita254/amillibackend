@@ -113,3 +113,16 @@ class CohortMembership(models.Model):
 
     def __str__(self):
         return f"{self.full_name} ({self.get_role_display()}, {self.cohort})"
+
+
+class LoginLink(models.Model):
+    """A one-time sign-in link. Only the SHA-256 of the token is stored."""
+
+    email = models.EmailField(db_index=True)
+    token_hash = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Sign-in link for {self.email}"

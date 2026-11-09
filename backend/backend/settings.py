@@ -174,7 +174,10 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
     ],
-    'DEFAULT_THROTTLE_RATES': {'email': '20/hour'},  # endpoints that send email
+    'DEFAULT_THROTTLE_RATES': {
+        'email': '20/hour',  # endpoints that send email
+        'signin_verify': '60/hour',  # redeeming sign-in links
+    },
 }
 
 
