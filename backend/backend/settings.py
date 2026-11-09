@@ -174,6 +174,9 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
     ],
+    # Number of reverse proxies in front of Django (nginx = 1), so throttling uses the address nginx
+    # appended instead of a client-supplied X-Forwarded-For.
+    'NUM_PROXIES': env_int('NUM_PROXIES', 1),
     'DEFAULT_THROTTLE_RATES': {
         'email': '20/hour',  # endpoints that send email
         'signin_verify': '60/hour',  # redeeming sign-in links

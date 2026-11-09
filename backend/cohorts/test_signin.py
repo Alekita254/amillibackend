@@ -58,6 +58,7 @@ class SigninHelperTests(TestCase):
         LoginLink.objects.create(email="ann@x.com", token_hash="used", expires_at=now + timedelta(minutes=5), used_at=now)
         LoginLink.objects.create(email="other@x.com", token_hash="other", expires_at=now - timedelta(minutes=1))
         LoginLink.objects.update(created_at=now - timedelta(seconds=61))  # all past the cooldown
+        LoginLink.objects.filter(token_hash__in=["expired", "used"]).update(created_at=now - timedelta(hours=25))  # old enough to clean up
         again = signin.issue_link("ann@x.com")
         self.assertTrue(again)
         hashes = set(LoginLink.objects.values_list("token_hash", flat=True))
@@ -404,3 +405,94 @@ class MeTests(TestCase):
         r = self.as_member("ann@x.com").patch(f"{ME_URL}{m.pk}/", {"about": ""}, format="json")
         self.assertEqual(r.status_code, 400)
         self.assertTrue(r.json()["message"])
+
+
+SEEDED_PHONE = "0799-VICTIM"
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class AccountTakeoverTests(TestCase):
+    """/api/register/ hands out tokens for an unverified account; that must never unlock someone else's data."""
+
+    def setUp(self):
+        cache.clear()
+        self.cohort = make_cohort("Alpha")
+        self.victim = add(self.cohort, "victim@x.com", phone=SEEDED_PHONE, full_name="Vic Tim")
+
+    def attacker(self):
+        client = APIClient()
+        r = client.post("/api/register/", {"username": "evil", "email": "Victim@x.com", "password": "evilpass123"}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        client.credentials(HTTP_AUTHORIZATION="Bearer " + r.json()["data"]["tokens"]["access"])
+        return client
+
+    def test_an_unverified_account_sees_and_edits_nothing(self):
+        client = self.attacker()
+        r = client.get(ME_URL)
+        self.assertEqual((r.status_code, r.json()["data"]["memberships"]), (200, []))
+        self.assertNotIn(SEEDED_PHONE, json.dumps(r.json()))
+        patch = client.patch(f"{ME_URL}{self.victim.pk}/", {"about": "pwned", "show_publicly": True}, format="json")
+        self.assertEqual(patch.status_code, 404)
+        self.victim.refresh_from_db()
+        self.assertEqual((self.victim.about, self.victim.show_publicly), ("about", False))
+
+    def test_the_real_owner_signing_in_gets_a_fresh_account_and_the_attacker_stays_locked_out(self):
+        attacker = self.attacker()
+        raw = signin.issue_link("victim@x.com")
+        r = APIClient().post(VERIFY_URL, {"token": raw}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        data = r.json()["data"]
+        self.assertNotEqual(data["user"]["username"], "evil")  # not the attacker's account
+        evil = User.objects.get(username="evil")
+        self.assertFalse(evil.email_verified)  # still unverified: the link did not adopt it
+        self.assertEqual(attacker.get(ME_URL).json()["data"]["memberships"], [])
+        owner = APIClient()
+        owner.credentials(HTTP_AUTHORIZATION="Bearer " + data["tokens"]["access"])
+        self.assertEqual(len(owner.get(ME_URL).json()["data"]["memberships"]), 1)
+        # and the attacker's password still doesn't get them in
+        login = APIClient().post("/api/token/", {"email": "victim@x.com", "password": "evilpass123"}, format="json")
+        self.assertEqual(login.status_code, 400)
+
+    def test_user_for_prefers_a_verified_account_and_never_touches_an_unverified_one(self):
+        unverified = User.objects.create_user("u1", "victim@x.com", "pw12345678", email_verified=False)
+        verified = User.objects.create_user("u2", "victim@x.com", "pw12345678", email_verified=True)
+        self.assertEqual(signin.user_for("victim@x.com").pk, verified.pk)
+        unverified.refresh_from_db()
+        self.assertFalse(unverified.email_verified)
+
+
+class SigninHardeningTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.cohort = make_cohort("Alpha")
+
+    def test_two_simultaneous_first_sign_ins_leave_one_account(self):
+        add(self.cohort, "ann@x.com")
+        rival = User.objects.create_user("ann@x.com", "ann@x.com", "pw12345678", email_verified=True)
+        real, calls = signin._find_user, []
+
+        def lookup_misses_once(email):  # the race: our lookup ran before the rival committed
+            calls.append(email)
+            return None if len(calls) == 1 else real(email)
+
+        with mock.patch.object(signin, "_find_user", side_effect=lookup_misses_once):
+            user = signin.user_for("ann@x.com")
+        self.assertEqual(user.pk, rival.pk)
+        self.assertEqual(User.objects.filter(email="ann@x.com").count(), 1)
+
+    def test_links_are_capped_per_email_per_day(self):
+        add(self.cohort, "ann@x.com")
+        for _ in range(10):
+            self.assertTrue(signin.issue_link("ann@x.com"))
+            LoginLink.objects.update(created_at=timezone.now() - timedelta(seconds=61))  # past the cooldown, same day
+        self.assertIsNone(signin.issue_link("ann@x.com"))  # the 11th in 24 hours
+        LoginLink.objects.update(created_at=timezone.now() - timedelta(hours=25))
+        self.assertTrue(signin.issue_link("ann@x.com"))
+
+    def test_throttle_cannot_be_dodged_by_spoofing_the_forwarded_for_header(self):
+        codes = [
+            APIClient().post(REQUEST_URL, {"email": "nobody@x.com"}, format="json",
+                             HTTP_X_FORWARDED_FOR=f"10.9.9.{i}, 203.0.113.5").status_code  # nginx appends the real address last
+            for i in range(25)
+        ]
+        self.assertIn(429, codes)

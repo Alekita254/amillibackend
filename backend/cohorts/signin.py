@@ -12,6 +12,8 @@ from .models import CohortMembership, LoginLink
 
 LINK_TTL = timedelta(minutes=15)
 COOLDOWN = timedelta(seconds=60)
+DAILY_WINDOW = timedelta(hours=24)
+DAILY_LIMIT = 10  # links per email per 24 hours, so nobody can be flooded with mail
 SESSION_REFRESH_LIFETIME = timedelta(days=30)
 
 User = get_user_model()
@@ -47,7 +49,10 @@ def issue_link(email: str):
     now = timezone.now()
     if LoginLink.objects.filter(email=email, created_at__gt=now - COOLDOWN).exists():
         return None
-    LoginLink.objects.filter(email=email).filter(Q(expires_at__lt=now) | Q(used_at__isnull=False)).delete()
+    # Used and expired links stay for a day because they count toward the daily limit.
+    LoginLink.objects.filter(email=email, created_at__lt=now - DAILY_WINDOW).delete()
+    if LoginLink.objects.filter(email=email, created_at__gt=now - DAILY_WINDOW).count() >= DAILY_LIMIT:
+        return None
     raw = secrets.token_urlsafe(32)
     LoginLink.objects.create(email=email, token_hash=hash_token(raw), expires_at=now + LINK_TTL)
     return raw
@@ -65,17 +70,20 @@ def redeem(raw: str):
     return LoginLink.objects.get(token_hash=digest) if claimed == 1 else None
 
 
+def _find_user(email: str):
+    """The verified account for this email. An unverified one proves nothing about who owns the mailbox:
+    /api/register/ creates unverified accounts for any address, so adopting one would hand it to a stranger."""
+    return User.objects.filter(email__iexact=email, email_verified=True).order_by("pk").first()
+
+
 def user_for(email: str):
     """The non-staff account for this email, created on first use. None if the address is blocked."""
     email = normalise(email)
     if _blocked(email):
         return None
-    user = User.objects.filter(email__iexact=email).order_by("pk").first()
-    if user:
-        if not user.email_verified:  # they just proved the mailbox is theirs
-            user.email_verified = True
-            user.save(update_fields=["email_verified"])
-        return user
+    existing = _find_user(email)
+    if existing:
+        return existing
 
     first = CohortMembership.objects.filter(email__iexact=email).order_by("created_at").first()
     parts = (first.full_name if first else "").split(None, 1)
@@ -92,6 +100,12 @@ def user_for(email: str):
     )
     user.set_unusable_password()
     user.save()
+
+    # Two first sign-ins racing both create an account; the oldest one wins and the other is dropped.
+    winner = _find_user(email)
+    if winner and winner.pk != user.pk:
+        user.delete()
+        return winner
     return user
 
 

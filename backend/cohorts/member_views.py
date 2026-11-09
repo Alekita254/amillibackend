@@ -62,7 +62,8 @@ class SigninVerifyView(APIView):
 def _mine(request):
     """The signed-in person's own applications, matched by email."""
     email = (request.user.email or "").strip()
-    if not email:
+    # An account whose email was never confirmed (anyone can register one with any address) must see nothing.
+    if not email or not request.user.email_verified:
         return CohortMembership.objects.none()
     return CohortMembership.objects.filter(email__iexact=email).select_related("cohort", "mentor")
 
