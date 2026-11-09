@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from cohorts import signin
-from cohorts.models import LoginLink
+from cohorts.models import CohortMembership, LoginLink
 from cohorts.tests import APPROVED, MENTEE, MENTOR, PENDING, REJECTED, add, make_cohort
 
 User = get_user_model()
@@ -190,3 +190,73 @@ class SigninRequestTests(TestCase):
 
     def test_uses_the_email_throttle_scope(self):
         self.assertEqual(SigninRequestView.throttle_scope, "email")
+
+
+from cohorts.member_views import SigninVerifyView
+
+VERIFY_URL = "/api/members/signin/verify/"
+INVALID_LINK = "This sign-in link has expired or was already used. Request a new one."
+
+
+class SigninVerifyTests(TestCase):
+    def setUp(self):
+        cache.clear()  # the 'signin_verify' throttle is shared with other tests
+        self.cohort = make_cohort("Alpha")
+        self.client = APIClient()
+
+    def link_for(self, email="ann@x.com"):
+        if not CohortMembership.objects.filter(email__iexact=email).exists():
+            add(self.cohort, email)
+        return signin.issue_link(email)
+
+    def verify(self, token):
+        return self.client.post(VERIFY_URL, {"token": token}, format="json")
+
+    def test_valid_link_signs_in_with_the_same_payload_as_the_admin_login(self):
+        r = self.verify(self.link_for())
+        self.assertEqual(r.status_code, 200, r.content)
+        data = r.json()["data"]
+        self.assertEqual((data["user"]["email"], data["user"]["is_staff"]), ("ann@x.com", False))
+        user = User.objects.get(email="ann@x.com")
+        self.assertEqual(RefreshToken(data["tokens"]["refresh"])["user_id"], str(user.pk))
+        self.assertTrue(data["tokens"]["access"])
+
+    def test_a_link_works_only_once(self):
+        raw = self.link_for()
+        self.assertEqual(self.verify(raw).status_code, 200)
+        again = self.verify(raw)
+        self.assertEqual((again.status_code, again.json()["message"]), (400, INVALID_LINK))
+
+    def test_expired_unknown_and_missing_tokens_are_rejected(self):
+        raw = self.link_for()
+        LoginLink.objects.update(expires_at=timezone.now() - timedelta(seconds=1))
+        for token in (raw, "garbage", ""):
+            r = self.verify(token)
+            self.assertEqual((r.status_code, r.json()["message"]), (400, INVALID_LINK), token)
+        self.assertEqual(self.client.post(VERIFY_URL, {}, format="json").status_code, 400)
+        self.assertEqual(User.objects.count(), 0)
+
+    def test_an_account_that_became_staff_after_the_link_was_issued_is_refused(self):
+        raw = self.link_for("boss@x.com")
+        User.objects.create_user("boss", "boss@x.com", "pw12345678", is_staff=True)
+        r = self.verify(raw)
+        self.assertEqual((r.status_code, r.json()["message"]), (400, INVALID_LINK))
+        self.assertNotIn("tokens", r.json().get("data") or {})
+
+    def test_one_staff_account_among_users_sharing_the_email_blocks_verify(self):
+        add(self.cohort, "dup@x.com")
+        User.objects.create_user("dup1", "dup@x.com", "pw12345678")
+        raw = signin.issue_link("dup@x.com")  # allowed: the only account is an ordinary one
+        User.objects.create_user("dup2", "dup@x.com", "pw12345678", is_staff=True)
+        self.assertEqual(self.verify(raw).status_code, 400)
+
+    def test_signing_in_again_reuses_the_same_account_and_case_does_not_matter(self):
+        self.assertEqual(self.verify(self.link_for("ann@x.com")).status_code, 200)
+        LoginLink.objects.update(created_at=timezone.now() - timedelta(seconds=61))
+        second = self.verify(signin.issue_link("  ANN@x.com "))
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(User.objects.filter(email__iexact="ann@x.com").count(), 1)
+
+    def test_uses_its_own_throttle_scope(self):
+        self.assertEqual(SigninVerifyView.throttle_scope, "signin_verify")
+

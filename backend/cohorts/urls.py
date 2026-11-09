@@ -1,5 +1,5 @@
 from django.urls import path
-from cohorts.member_views import SigninRequestView
+from cohorts.member_views import SigninRequestView, SigninVerifyView
 from cohorts.views import CohortListCreateView, CohortDetailView, CohortRegisterView, CohortPeopleView, CohortMemberListCreateView, CohortMemberDetailView
 
 urlpatterns = [
@@ -8,6 +8,7 @@ urlpatterns = [
     path("cohorts/<slug:slug>/register/", CohortRegisterView.as_view(), name="cohort-register"),
     path("cohorts/<slug:slug>/people/", CohortPeopleView.as_view(), name="cohort-people"),
     path("cohorts/<slug:slug>/members/", CohortMemberListCreateView.as_view(), name="cohort-members"),
+    path("members/signin/verify/", SigninVerifyView.as_view(), name="member-signin-verify"),
     path("members/signin/request/", SigninRequestView.as_view(), name="member-signin-request"),
     path("cohorts/<slug:slug>/members/<int:pk>/", CohortMemberDetailView.as_view(), name="cohort-member"),
 ]
